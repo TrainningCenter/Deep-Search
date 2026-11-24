@@ -1,6 +1,6 @@
 
 use crate::{FileRecord, IndexingStatus};
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, params_from_iter, types::Value, Connection, Result};
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -9,6 +9,57 @@ pub struct SearchResult {
     pub name: String,
     pub extension: Option<String>,
     pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SearchExpression {
+    NameContains(String),
+    ExtensionEquals(String),
+    SizeAtLeast(u64),
+    SizeAtMost(u64),
+    And(Vec<SearchExpression>),
+    Or(Vec<SearchExpression>),
+    Not(Box<SearchExpression>),
+}
+
+fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) -> String {
+    match expression {
+        SearchExpression::NameContains(term) => {
+            let escaped = term.trim()
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            values.push(Value::Text(format!("%{escaped}%")));
+            format!("name LIKE ?{} ESCAPE '\\' COLLATE NOCASE", values.len())
+        }
+        SearchExpression::ExtensionEquals(extension) => {
+            values.push(Value::Text(extension.trim().trim_start_matches('.').to_lowercase()));
+            format!("extension = ?{} COLLATE NOCASE", values.len())
+        }
+        SearchExpression::SizeAtLeast(size) => {
+            values.push(Value::Integer((*size).min(i64::MAX as u64) as i64));
+            format!("size_bytes >= ?{}", values.len())
+        }
+        SearchExpression::SizeAtMost(size) => {
+            values.push(Value::Integer((*size).min(i64::MAX as u64) as i64));
+            format!("size_bytes <= ?{}", values.len())
+        }
+        SearchExpression::And(expressions) => {
+            if expressions.is_empty() { return "1 = 1".to_string(); }
+            let parts: Vec<String> = expressions.iter()
+                .map(|item| compile_expression(item, values)).collect();
+            format!("({})", parts.join(" AND "))
+        }
+        SearchExpression::Or(expressions) => {
+            if expressions.is_empty() { return "0 = 1".to_string(); }
+            let parts: Vec<String> = expressions.iter()
+                .map(|item| compile_expression(item, values)).collect();
+            format!("({})", parts.join(" OR "))
+        }
+        SearchExpression::Not(inner) => {
+            format!("NOT ({})", compile_expression(inner, values))
+        }
+    }
 }
 
 pub struct Database {
@@ -102,6 +153,26 @@ impl Database {
         )?;
 
         Ok(count.max(0) as u64)
+    }
+
+    pub fn search(&self, expression: &SearchExpression) -> Result<Vec<SearchResult>> {
+        let mut values = Vec::new();
+        let condition = compile_expression(expression, &mut values);
+        let sql = format!(
+            "SELECT path, name, extension, size_bytes FROM files WHERE {condition} ORDER BY name COLLATE NOCASE"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(values.iter()), |row| {
+            let path: String = row.get(0)?;
+            let size: i64 = row.get(3)?;
+            Ok(SearchResult {
+                path: path.into(),
+                name: row.get(1)?,
+                extension: row.get(2)?,
+                size_bytes: size.max(0) as u64,
+            })
+        })?;
+        rows.collect()
     }
 
     pub fn search_by_name(&self, term: &str) -> Result<Vec<SearchResult>> {
@@ -233,6 +304,50 @@ mod database_tests {
             .unwrap();
 
         assert_eq!(db.file_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn combines_search_conditions_with_and() {
+        let db = Database::open(":memory:").unwrap();
+        db.upsert_file(&sample_file("movie.mkv", 5_000)).unwrap();
+        db.upsert_file(&sample_file("movie.mp4", 50_000)).unwrap();
+        db.upsert_file(&sample_file("notes.mkv", 5_000)).unwrap();
+
+        let query = SearchExpression::And(vec![
+            SearchExpression::NameContains("movie".into()),
+            SearchExpression::ExtensionEquals("mkv".into()),
+            SearchExpression::SizeAtLeast(1_000),
+            SearchExpression::SizeAtMost(10_000),
+        ]);
+        let results = db.search(&query).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "movie.mkv");
+    }
+
+    #[test]
+    fn supports_or_and_not_search_conditions() {
+        let db = Database::open(":memory:").unwrap();
+        db.upsert_file(&sample_file("movie.mkv", 5_000)).unwrap();
+        db.upsert_file(&sample_file("movie.mp4", 50_000)).unwrap();
+        db.upsert_file(&sample_file("notes.txt", 500)).unwrap();
+
+        let query = SearchExpression::And(vec![
+            SearchExpression::Or(vec![
+                SearchExpression::ExtensionEquals("mkv".into()),
+                SearchExpression::ExtensionEquals("mp4".into()),
+            ]),
+            SearchExpression::Not(Box::new(SearchExpression::SizeAtLeast(20_000))),
+        ]);
+        let results = db.search(&query).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "movie.mkv");
+    }
+
+    #[test]
+    fn empty_or_expression_matches_nothing() {
+        let db = Database::open(":memory:").unwrap();
+        db.upsert_file(&sample_file("report.pdf", 1_000)).unwrap();
+        assert!(db.search(&SearchExpression::Or(vec![])).unwrap().is_empty());
     }
 
     #[test]
