@@ -201,7 +201,7 @@ fn extract_rtf_text(rtf: &str) -> Option<String> {
                     }
                 }
             }
-            byte if !state.skip => {
+            _byte if !state.skip => {
                 let remaining = std::str::from_utf8(&bytes[index..]).ok()?;
                 let character = remaining.chars().next()?;
                 output.push(character);
