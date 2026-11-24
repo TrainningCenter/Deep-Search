@@ -521,7 +521,7 @@ impl Database {
         let sql = format!(
             "SELECT path, name, extension, size_bytes FROM files
              WHERE {condition}
-             ORDER BY {relevance}, name COLLATE NOCASE
+             ORDER BY {relevance}, name COLLATE NOCASE, path COLLATE NOCASE
              LIMIT ?{} OFFSET ?{}",
             values.len() - 1,
             values.len()
@@ -803,6 +803,37 @@ mod database_tests {
         );
         assert!(db.search_page(&expression, 0, 0).unwrap().len() <= 1);
         assert!(db.search_page(&expression, 5000, 0).unwrap().len() <= 3);
+    }
+
+    #[test]
+    fn paginated_search_uses_a_stable_path_tiebreaker_for_duplicate_names() {
+        let db = Database::open(":memory:").unwrap();
+
+        for directory in ["alpha", "bravo", "charlie"] {
+            let mut file = sample_file("report.txt", 100);
+            file.path = PathBuf::from(format!("/{directory}/report.txt"));
+            db.upsert_file(&file).unwrap();
+        }
+
+        let expression = SearchExpression::NameContains("report".into());
+        let first_page = db.search_page(&expression, 2, 0).unwrap();
+        let second_page = db.search_page(&expression, 2, 2).unwrap();
+
+        let paths: Vec<String> = first_page
+            .iter()
+            .chain(second_page.iter())
+            .map(|file| file.path.to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(
+            paths,
+            vec![
+                "/alpha/report.txt",
+                "/bravo/report.txt",
+                "/charlie/report.txt",
+            ]
+        );
+        assert_eq!(paths.iter().collect::<std::collections::HashSet<_>>().len(), 3);
     }
 
     #[test]
