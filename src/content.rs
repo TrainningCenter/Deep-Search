@@ -40,7 +40,7 @@ fn extract_rtf_text(rtf: &str) -> Option<String> {
             if index >= bytes.len() {
                 break;
             }
-            if bytes[index] == b'\\\\' {
+            if bytes[index] == b'\\' {
                 index += 1;
                 if index >= bytes.len() {
                     break;
@@ -95,14 +95,14 @@ fn extract_rtf_text(rtf: &str) -> Option<String> {
                 }
                 index += 1;
             }
-            b'\\\\' => {
+            b'\\' => {
                 index += 1;
                 if index >= bytes.len() {
                     break;
                 }
 
                 let symbol = bytes[index];
-                if symbol == b'\\\\' || symbol == b'{' || symbol == b'}' {
+                if symbol == b'\\' || symbol == b'{' || symbol == b'}' {
                     if !state.skip {
                         output.push(symbol as char);
                     }
