@@ -516,10 +516,10 @@ mod tests {
 
     #[test]
     fn extracts_rtf_text_and_ignores_formatting_destinations() {
-        let rtf = r#"{\\rtf1\\ansi This is \\b bold\\b0 text.\\par
-{\\fonttbl{\\f0 Arial;}}{\\*\\generator HiddenGenerator;}
-Arabic: \\u1605?\\u1585?\\u1581?\\u1576?\\u1575?\\par
-Escaped: \\{literal\\} and \\~ space.}"#;
+        let rtf = r#"{\rtf1\ansi This is \b bold\b0 text.\par
+{\fonttbl{\f0 Arial;}}{\*\generator HiddenGenerator;}
+Arabic: \u1605?\u1585?\u1581?\u1576?\u1575?\par
+Escaped: \{literal\} and \~ space.}"#;
         let text = extract_rtf_text(rtf).unwrap();
 
         assert!(text.contains("This is bold text."));
