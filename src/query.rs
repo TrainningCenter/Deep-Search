@@ -90,6 +90,11 @@ fn parse_condition(token: &str) -> Result<SearchExpression, String> {
         if value.is_empty() { return Err("name: requires a value".into()); }
         return Ok(SearchExpression::NameContains(value.into()));
     }
+    if lower.starts_with("path:") {
+        let value = &token[5..];
+        if value.is_empty() { return Err("path: requires a value".into()); }
+        return Ok(SearchExpression::PathContains(value.into()));
+    }
     if lower.starts_with("content:") {
         let value = &token[8..];
         if value.is_empty() { return Err("content: requires a value".into()); }
@@ -148,6 +153,17 @@ mod tests {
             SearchExpression::Not(Box::new(SearchExpression::ExtensionEquals("tmp".into()))),
             SearchExpression::SizeAtMost(500 * 1024 * 1024),
         ]));
+    }
+
+    #[test]
+    fn parses_path_search_condition() {
+        assert_eq!(
+            parse_query(r#"path:"project archive" AND ext:pdf"#).unwrap(),
+            SearchExpression::And(vec![
+                SearchExpression::PathContains("project archive".into()),
+                SearchExpression::ExtensionEquals("pdf".into()),
+            ])
+        );
     }
 
     #[test]
