@@ -730,6 +730,20 @@ mod database_tests {
     }
 
     #[test]
+    fn detects_modification_timestamp_changes_within_the_same_second() {
+        let db = Database::open(":memory:").unwrap();
+        let original = sample_file("rapid-edit.txt", 10);
+        db.upsert_file(&original).unwrap();
+        assert!(db.is_file_unchanged(&original).unwrap());
+
+        let mut changed = original.clone();
+        changed.modified_timestamp_ns = Some(
+            original.modified_timestamp_ns.unwrap() + 1_000_000
+        );
+        assert!(!db.is_file_unchanged(&changed).unwrap());
+    }
+
+    #[test]
     fn saves_and_counts_files() {
         let db = Database::open(":memory:").unwrap();
 
