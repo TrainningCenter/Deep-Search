@@ -12,6 +12,7 @@ pub struct IndexingReport {
     pub directories_scanned: u64,
     pub errors: u64,
     pub files_saved: u64,
+    pub files_unchanged: u64,
 }
 
 pub struct SearchEngine {
@@ -35,11 +36,24 @@ impl SearchEngine {
             directories_scanned: scan.directories_scanned,
             errors: scan.errors,
             files_saved: 0,
+            files_unchanged: 0,
         };
 
         for file in &scan.files {
+            match self.database.is_file_unchanged(file) {
+                Ok(true) => {
+                    report.files_unchanged += 1;
+                    continue;
+                }
+                Ok(false) => {}
+                Err(_) => {
+                    report.errors += 1;
+                    continue;
+                }
+            }
+
             let content = extract_text(&file.path, file.size_bytes);
-            match self.database.upsert_file_with_content(file, content.as_deref()) {
+            match self.database.replace_file_with_content(file, content.as_deref()) {
                 Ok(()) => report.files_saved += 1,
                 Err(_) => report.errors += 1,
             }
