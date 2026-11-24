@@ -13,6 +13,7 @@ pub struct IndexingReport {
     pub errors: u64,
     pub files_saved: u64,
     pub files_unchanged: u64,
+    pub files_removed: u64,
 }
 
 pub struct SearchEngine {
@@ -37,8 +38,10 @@ impl SearchEngine {
             errors: scan.errors,
             files_saved: 0,
             files_unchanged: 0,
+            files_removed: 0,
         };
 
+        let mut indexing_failed = false;
         for file in &scan.files {
             match self.database.is_file_unchanged(file) {
                 Ok(true) => {
@@ -48,6 +51,7 @@ impl SearchEngine {
                 Ok(false) => {}
                 Err(_) => {
                     report.errors += 1;
+                    indexing_failed = true;
                     continue;
                 }
             }
@@ -55,6 +59,17 @@ impl SearchEngine {
             let content = extract_text(&file.path, file.size_bytes);
             match self.database.replace_file_with_content(file, content.as_deref()) {
                 Ok(()) => report.files_saved += 1,
+                Err(_) => {
+                    report.errors += 1;
+                    indexing_failed = true;
+                }
+            }
+        }
+
+        if !indexing_failed && !scan.completed_roots.is_empty() {
+            let present_paths: Vec<_> = scan.files.iter().map(|file| file.path.clone()).collect();
+            match self.database.prune_missing_files(&scan.completed_roots, &present_paths) {
+                Ok(removed) => report.files_removed = removed,
                 Err(_) => report.errors += 1,
             }
         }
