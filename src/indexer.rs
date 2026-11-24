@@ -8,17 +8,17 @@ pub struct ScanReport {
     pub files: Vec<FileRecord>,
     pub directories_scanned: u64,
     pub errors: u64,
+    /// Roots that were traversed completely and are safe to reconcile.
+    pub completed_roots: Vec<(PathBuf, bool)>,
 }
 
 pub fn scan_paths<P: AsRef<Path>>(paths: &[P]) -> ScanReport {
     let mut report = ScanReport::default();
-    let mut pending: Vec<PathBuf> = paths
-        .iter()
-        .map(|path| path.as_ref().to_path_buf())
-        .collect();
 
-    while let Some(path) = pending.pop() {
-        let metadata = match fs::symlink_metadata(&path) {
+    for input in paths {
+        let root = input.as_ref().to_path_buf();
+        let errors_before = report.errors;
+        let root_metadata = match fs::symlink_metadata(&root) {
             Ok(metadata) => metadata,
             Err(_) => {
                 report.errors += 1;
@@ -26,55 +26,68 @@ pub fn scan_paths<P: AsRef<Path>>(paths: &[P]) -> ScanReport {
             }
         };
 
-        if metadata.file_type().is_symlink() {
+        if root_metadata.file_type().is_symlink() {
             continue;
         }
 
-        if metadata.is_dir() {
-            report.directories_scanned += 1;
+        let root_is_directory = root_metadata.is_dir();
+        let mut pending = vec![root.clone()];
 
-            let entries = match fs::read_dir(&path) {
-                Ok(entries) => entries,
+        while let Some(path) = pending.pop() {
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
                 Err(_) => {
                     report.errors += 1;
                     continue;
                 }
             };
 
-            for entry in entries {
-                match entry {
-                    Ok(entry) => pending.push(entry.path()),
-                    Err(_) => report.errors += 1,
-                }
+            if metadata.file_type().is_symlink() {
+                continue;
             }
 
-            continue;
+            if metadata.is_dir() {
+                report.directories_scanned += 1;
+                let entries = match fs::read_dir(&path) {
+                    Ok(entries) => entries,
+                    Err(_) => {
+                        report.errors += 1;
+                        continue;
+                    }
+                };
+
+                for entry in entries {
+                    match entry {
+                        Ok(entry) => pending.push(entry.path()),
+                        Err(_) => report.errors += 1,
+                    }
+                }
+                continue;
+            }
+
+            if metadata.is_file() {
+                let name = path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let extension = path.extension()
+                    .map(|ext| ext.to_string_lossy().to_lowercase());
+                let modified_unix = metadata.modified().ok()
+                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_secs());
+
+                report.files.push(FileRecord {
+                    path,
+                    name,
+                    extension,
+                    size_bytes: metadata.len(),
+                    modified_unix,
+                    status: IndexingStatus::Pending,
+                });
+            }
         }
 
-        if metadata.is_file() {
-            let name = path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default();
-
-            let extension = path
-                .extension()
-                .map(|ext| ext.to_string_lossy().to_lowercase());
-
-            let modified_unix = metadata
-                .modified()
-                .ok()
-                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-                .map(|duration| duration.as_secs());
-
-            report.files.push(FileRecord {
-                path,
-                name,
-                extension,
-                size_bytes: metadata.len(),
-                modified_unix,
-                status: IndexingStatus::Pending,
-            });
+        if report.errors == errors_before {
+            report.completed_roots.push((root, root_is_directory));
         }
     }
 
@@ -95,7 +108,6 @@ mod tests {
             "deep-search-indexer-{}-{id}",
             std::process::id()
         ));
-
         fs::create_dir_all(&path).unwrap();
         path
     }
@@ -105,12 +117,10 @@ mod tests {
         let root = create_temp_dir();
         let nested = root.join("nested").join("deeper");
         fs::create_dir_all(&nested).unwrap();
-
         fs::write(root.join("alpha.TXT"), b"hello").unwrap();
         fs::write(nested.join("video.MKV"), b"video-data").unwrap();
 
         let report = scan_paths(&[root.as_path()]);
-
         assert_eq!(report.errors, 0);
         assert_eq!(report.directories_scanned, 3);
         assert_eq!(report.files.len(), 2);
@@ -121,20 +131,18 @@ mod tests {
         assert_eq!(report.files[1].name, "video.MKV");
         assert_eq!(report.files[1].extension.as_deref(), Some("mkv"));
         assert_eq!(report.files[1].size_bytes, 10);
-
+        assert_eq!(report.completed_roots, vec![(root.clone(), true)]);
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn reports_missing_paths_as_errors() {
+    fn reports_missing_paths_as_errors_and_never_marks_them_complete() {
         let root = create_temp_dir();
         let missing = root.join("does-not-exist");
-
         let report = scan_paths(&[missing.as_path()]);
-
         assert!(report.files.is_empty());
         assert_eq!(report.errors, 1);
-
+        assert!(report.completed_roots.is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -143,16 +151,14 @@ mod tests {
         let root = create_temp_dir();
         let file_path = root.join("single.pdf");
         fs::write(&file_path, b"pdf-data").unwrap();
-
         let report = scan_paths(&[file_path.as_path()]);
-
         assert_eq!(report.errors, 0);
         assert_eq!(report.directories_scanned, 0);
         assert_eq!(report.files.len(), 1);
         assert_eq!(report.files[0].name, "single.pdf");
         assert_eq!(report.files[0].extension.as_deref(), Some("pdf"));
         assert_eq!(report.files[0].size_bytes, 8);
-
+        assert_eq!(report.completed_roots, vec![(file_path.clone(), false)]);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -163,15 +169,12 @@ mod tests {
         let second = root.join("alpha.txt");
         fs::write(&first, b"z").unwrap();
         fs::write(&second, b"a").unwrap();
-
-        // Deliberately provide paths in reverse lexical order.
         let report = scan_paths(&[first.as_path(), second.as_path()]);
-
         assert_eq!(report.errors, 0);
         assert_eq!(report.files.len(), 2);
         assert_eq!(report.files[0].name, "alpha.txt");
         assert_eq!(report.files[1].name, "zeta.txt");
-
+        assert_eq!(report.completed_roots.len(), 2);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -179,24 +182,20 @@ mod tests {
     #[test]
     fn does_not_follow_symbolic_links() {
         use std::os::unix::fs::symlink;
-
         let root = create_temp_dir();
         let target_dir = root.join("target");
         let scan_dir = root.join("scan");
         fs::create_dir_all(&target_dir).unwrap();
         fs::create_dir_all(&scan_dir).unwrap();
-
         fs::write(target_dir.join("target.txt"), b"target").unwrap();
         fs::write(root.join("target-file.txt"), b"file").unwrap();
         symlink(&target_dir, scan_dir.join("linked-dir")).unwrap();
         symlink(root.join("target-file.txt"), scan_dir.join("linked-file.txt")).unwrap();
-
         let report = scan_paths(&[scan_dir.as_path()]);
-
         assert_eq!(report.errors, 0);
         assert_eq!(report.directories_scanned, 1);
         assert!(report.files.is_empty());
-
+        assert_eq!(report.completed_roots.len(), 1);
         fs::remove_dir_all(root).unwrap();
     }
 }
