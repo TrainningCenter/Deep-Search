@@ -15,5 +15,8 @@ path = "src/main.rs"
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
+pdf-extract = "0.10"
+roxmltree = "0.20"
+zip = { version = "4", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
