@@ -457,6 +457,36 @@ mod database_tests {
     }
 
     #[test]
+    fn detects_unchanged_files_using_size_and_modification_time() {
+        let db = Database::open(":memory:").unwrap();
+        let file = sample_file("stable.txt", 128);
+        db.upsert_file_with_content(&file, Some("stable searchable content")).unwrap();
+
+        assert!(db.is_file_unchanged(&file).unwrap());
+
+        let mut changed = file.clone();
+        changed.size_bytes += 1;
+        assert!(!db.is_file_unchanged(&changed).unwrap());
+
+        let mut changed_time = file.clone();
+        changed_time.modified_unix = Some(1_700_000_001);
+        assert!(!db.is_file_unchanged(&changed_time).unwrap());
+    }
+
+    #[test]
+    fn replacement_clears_stale_content_when_extraction_fails() {
+        let db = Database::open(":memory:").unwrap();
+        let file = sample_file("changed.txt", 20);
+        db.upsert_file_with_content(&file, Some("old searchable content")).unwrap();
+
+        let mut changed = file.clone();
+        changed.size_bytes = 30;
+        db.replace_file_with_content(&changed, None).unwrap();
+
+        assert!(db.search_content("old searchable").unwrap().is_empty());
+    }
+
+    #[test]
     fn searches_files_by_name() {
         let db = Database::open(":memory:").unwrap();
 
