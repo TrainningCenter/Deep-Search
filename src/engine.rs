@@ -1,7 +1,7 @@
 
 use crate::content::extract_text;
 use crate::database::{Database, SearchExpression, SearchResult};
-use crate::indexer::scan_paths;
+use crate::indexer::scan_paths_batched;
 use rusqlite::Result;
 use std::path::Path;
 
@@ -30,39 +30,41 @@ impl SearchEngine {
         &self,
         paths: &[P],
     ) -> IndexingReport {
-        let scan = scan_paths(paths);
-
-        let mut report = IndexingReport {
-            files_discovered: scan.files.len() as u64,
-            directories_scanned: scan.directories_scanned,
-            errors: scan.errors,
-            files_saved: 0,
-            files_unchanged: 0,
-            files_removed: 0,
+        const INDEX_BATCH_SIZE: usize = 128;
+        let scan_id = match self.database.begin_scan() {
+            Ok(id) => id,
+            Err(_) => {
+                return IndexingReport {
+                    errors: 1,
+                    ..IndexingReport::default()
+                };
+            }
         };
 
-        const INDEX_BATCH_SIZE: usize = 128;
+        let mut report = IndexingReport::default();
         let mut indexing_failed = false;
 
-        for chunk in scan.files.chunks(INDEX_BATCH_SIZE) {
-            let mut pending_batch = Vec::with_capacity(chunk.len());
+        let scan = scan_paths_batched(paths, INDEX_BATCH_SIZE, |batch| {
+            if self.database.mark_scan_seen(scan_id, batch).is_err() {
+                indexing_failed = true;
+                return false;
+            }
 
-            for file in chunk {
+            let mut pending_batch = Vec::with_capacity(batch.len());
+            for file in batch {
                 match self.database.is_file_unchanged(file) {
                     Ok(true) => {
                         report.files_unchanged += 1;
-                        continue;
                     }
-                    Ok(false) => {}
+                    Ok(false) => {
+                        let content = extract_text(&file.path, file.size_bytes);
+                        pending_batch.push((file.clone(), content));
+                    }
                     Err(_) => {
                         report.errors += 1;
                         indexing_failed = true;
-                        continue;
                     }
                 }
-
-                let content = extract_text(&file.path, file.size_bytes);
-                pending_batch.push((file.clone(), content));
             }
 
             if !pending_batch.is_empty() {
@@ -75,14 +77,23 @@ impl SearchEngine {
                     }
                 }
             }
-        }
+            true
+        });
 
-        if !indexing_failed && !scan.completed_roots.is_empty() {
-            let present_paths: Vec<_> = scan.files.iter().map(|file| file.path.clone()).collect();
-            match self.database.prune_missing_files(&scan.completed_roots, &present_paths) {
+        report.files_discovered = scan.files_discovered;
+        report.directories_scanned = scan.directories_scanned;
+        report.errors += scan.errors;
+
+        if !indexing_failed && scan.errors == 0 && !scan.completed_roots.is_empty() {
+            match self.database.finish_scan(scan_id, &scan.completed_roots) {
                 Ok(removed) => report.files_removed = removed,
-                Err(_) => report.errors += 1,
+                Err(_) => {
+                    report.errors += 1;
+                    let _ = self.database.discard_scan(scan_id);
+                }
             }
+        } else {
+            let _ = self.database.discard_scan(scan_id);
         }
 
         report
