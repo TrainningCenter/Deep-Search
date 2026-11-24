@@ -1,6 +1,7 @@
 pub mod database;
 pub mod engine;
 pub mod indexer;
+pub mod query;
 
 pub const APP_NAME: &str = "Deep-Search";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
