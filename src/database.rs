@@ -227,7 +227,7 @@ mod database_tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "report.pdf");
     }
-
+#
     #[test]
     fn searches_files_by_extension() {
         let db = Database::open(":memory:").unwrap();
