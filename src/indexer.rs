@@ -78,5 +78,81 @@ pub fn scan_paths<P: AsRef<Path>>(paths: &[P]) -> ScanReport {
         }
     }
 
+    report.files.sort_by(|left, right| left.path.cmp(&right.path));
     report
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn create_temp_dir() -> PathBuf {
+        let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "deep-search-indexer-{}-{id}",
+            std::process::id()
+        ));
+
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn recursively_discovers_files_and_metadata() {
+        let root = create_temp_dir();
+        let nested = root.join("nested").join("deeper");
+        fs::create_dir_all(&nested).unwrap();
+
+        fs::write(root.join("alpha.TXT"), b"hello").unwrap();
+        fs::write(nested.join("video.MKV"), b"video-data").unwrap();
+
+        let report = scan_paths(&[root.as_path()]);
+
+        assert_eq!(report.errors, 0);
+        assert_eq!(report.directories_scanned, 3);
+        assert_eq!(report.files.len(), 2);
+        assert_eq!(report.files[0].name, "alpha.TXT");
+        assert_eq!(report.files[0].extension.as_deref(), Some("txt"));
+        assert_eq!(report.files[0].size_bytes, 5);
+        assert_eq!(report.files[0].status, IndexingStatus::Pending);
+        assert_eq!(report.files[1].name, "video.MKV");
+        assert_eq!(report.files[1].extension.as_deref(), Some("mkv"));
+        assert_eq!(report.files[1].size_bytes, 10);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reports_missing_paths_as_errors() {
+        let root = create_temp_dir();
+        let missing = root.join("does-not-exist");
+
+        let report = scan_paths(&[missing.as_path()]);
+
+        assert!(report.files.is_empty());
+        assert_eq!(report.errors, 1);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn can_scan_a_single_file_path() {
+        let root = create_temp_dir();
+        let file_path = root.join("single.pdf");
+        fs::write(&file_path, b"pdf-data").unwrap();
+
+        let report = scan_paths(&[file_path.as_path()]);
+
+        assert_eq!(report.errors, 0);
+        assert_eq!(report.directories_scanned, 0);
+        assert_eq!(report.files.len(), 1);
+        assert_eq!(report.files[0].name, "single.pdf");
+        assert_eq!(report.files[0].extension.as_deref(), Some("pdf"));
+        assert_eq!(report.files[0].size_bytes, 8);
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }
