@@ -49,13 +49,13 @@ fn name_relevance_order(expression: &SearchExpression, values: &mut Vec<Value>) 
         values.push(Value::Text(term.to_string()));
         let prefix_index = values.len() + 1;
         let escaped = term
-            .replace('\\\\', "\\\\\\\\")
-            .replace('%', "\\\\%")
-            .replace('_', "\\\\_");
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
         values.push(Value::Text(format!("{escaped}%")));
         scores.push(format!(
             "CASE WHEN name = ?{exact_index} COLLATE NOCASE THEN 0
-                  WHEN name LIKE ?{prefix_index} ESCAPE '\\\\' COLLATE NOCASE THEN 1
+                  WHEN name LIKE ?{prefix_index} ESCAPE '\\' COLLATE NOCASE THEN 1
                   ELSE 2 END"
         ));
     }
