@@ -1,3 +1,4 @@
+
 use crate::database::{Database, SearchResult};
 use crate::indexer::scan_paths;
 use rusqlite::Result;
@@ -50,5 +51,20 @@ impl SearchEngine {
 
     pub fn search_by_name(&self, term: &str) -> Result<Vec<SearchResult>> {
         self.database.search_by_name(term)
+    }
+
+    pub fn search_by_extension(
+        &self,
+        extension: &str,
+    ) -> Result<Vec<SearchResult>> {
+        self.database.search_by_extension(extension)
+    }
+
+    pub fn search_by_size_range(
+        &self,
+        min_bytes: Option<u64>,
+        max_bytes: Option<u64>,
+    ) -> Result<Vec<SearchResult>> {
+        self.database.search_by_size_range(min_bytes, max_bytes)
     }
 }
