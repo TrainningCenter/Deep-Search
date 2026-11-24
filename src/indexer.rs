@@ -130,16 +130,16 @@ where
 fn file_record(path: PathBuf, metadata: &fs::Metadata) -> Option<FileRecord> {
     let name = path.file_name()?.to_string_lossy().into_owned();
     let extension = path.extension().map(|ext| ext.to_string_lossy().to_lowercase());
-    let modified_unix = metadata.modified().ok()
+    let modified_timestamp_ns = metadata.modified().ok()
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_secs());
+        .map(|duration| duration.as_nanos().min(u64::MAX as u128) as u64);
 
     Some(FileRecord {
         path,
         name,
         extension,
         size_bytes: metadata.len(),
-        modified_unix,
+        modified_timestamp_ns,
         status: IndexingStatus::Pending,
     })
 }
