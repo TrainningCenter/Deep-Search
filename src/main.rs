@@ -97,6 +97,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        "content" => {
+            if args.len() < 4 {
+                print_usage();
+                return Ok(());
+            }
+
+            let term = args[3..].join(" ");
+            let results = engine.search_content(&term)?;
+            println!("Found {} result(s).", results.len());
+            for file in results {
+                println!(
+                    "{} | {} bytes | {}",
+                    file.name,
+                    file.size_bytes,
+                    file.path.display()
+                );
+            }
+        }
+
         "extension" => {
             if args.len() != 4 {
                 print_usage();
@@ -136,6 +155,7 @@ fn print_usage() {
     println!("Commands:");
     println!("  deep-search index <database> <folder>...");
     println!("  deep-search search <database> <name>");
+    println!("  deep-search content <database> <text>");
     println!(r#"  deep-search query <database> 'name:video' AND (ext:mkv OR ext:mp4) AND size>=1GB"#);
     println!("  deep-search extension <database> <extension>");
     println!("  deep-search count <database>");
