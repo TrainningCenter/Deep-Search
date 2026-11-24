@@ -1,6 +1,6 @@
 
 use crate::{FileRecord, IndexingStatus};
-use rusqlite::{params, params_from_iter, types::Value, Connection, Result};
+use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension, Result};
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -132,13 +132,28 @@ impl Database {
         file: &FileRecord,
         content: Option<&str>,
     ) -> Result<()> {
+        self.upsert_file_internal(file, content, true)
+    }
+
+    /// Replace stored content even when extraction returns None.
+    /// This prevents stale searchable text after a file changes format.
+    pub fn replace_file_with_content(
+        &self,
+        file: &FileRecord,
+        content: Option<&str>,
+    ) -> Result<()> {
+        self.upsert_file_internal(file, content, false)
+    }
+
+    fn upsert_file_internal(
+        &self,
+        file: &FileRecord,
+        content: Option<&str>,
+        preserve_missing_content: bool,
+    ) -> Result<()> {
         let path = file.path.to_string_lossy().to_string();
         let size = file.size_bytes.min(i64::MAX as u64) as i64;
-
-        let modified = file
-            .modified_unix
-            .map(|value| value.min(i64::MAX as u64) as i64);
-
+        let modified = file.modified_unix.map(|value| value.min(i64::MAX as u64) as i64);
         let status = match &file.status {
             IndexingStatus::Pending => "pending",
             IndexingStatus::Indexing => "indexing",
@@ -146,32 +161,43 @@ impl Database {
             IndexingStatus::Skipped => "skipped",
             IndexingStatus::Failed => "failed",
         };
-
-        self.connection.execute(
-            "
-            INSERT INTO files
+        let content_update = if preserve_missing_content {
+            "COALESCE(excluded.content, files.content)"
+        } else {
+            "excluded.content"
+        };
+        let sql = format!(
+            "INSERT INTO files
                 (path, name, extension, size_bytes, modified_unix, status, content)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-            ON CONFLICT(path) DO UPDATE SET
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(path) DO UPDATE SET
                 name = excluded.name,
                 extension = excluded.extension,
                 size_bytes = excluded.size_bytes,
                 modified_unix = excluded.modified_unix,
                 status = excluded.status,
-                content = COALESCE(excluded.content, files.content)
-            ",
-            params![
-                path,
-                file.name,
-                file.extension,
-                size,
-                modified,
-                status,
-                content
-            ],
-        )?;
+                content = {content_update}"
+        );
 
+        self.connection.execute(
+            &sql,
+            params![path, file.name, file.extension, size, modified, status, content],
+        )?;
         Ok(())
+    }
+
+    /// Returns true when size and modification time match the stored record.
+    pub fn is_file_unchanged(&self, file: &FileRecord) -> Result<bool> {
+        let path = file.path.to_string_lossy().to_string();
+        let size = file.size_bytes.min(i64::MAX as u64) as i64;
+        let modified = file.modified_unix.map(|value| value.min(i64::MAX as u64) as i64);
+        let unchanged: Option<bool> = self.connection.query_row(
+            "SELECT size_bytes = ?2 AND modified_unix IS ?3
+             FROM files WHERE path = ?1",
+            params![path, size, modified],
+            |row| row.get(0),
+        ).optional()?;
+        Ok(unchanged.unwrap_or(false))
     }
 
     pub fn file_count(&self) -> Result<u64> {
