@@ -484,11 +484,30 @@ impl Database {
     }
 
     pub fn search(&self, expression: &SearchExpression) -> Result<Vec<SearchResult>> {
+        self.search_page(expression, u32::MAX, 0)
+    }
+
+    /// Return a bounded page of matching files while preserving relevance order.
+    /// Page sizes are clamped to 1..=1000 to protect the search service from
+    /// accidentally loading an unbounded result set.
+    pub fn search_page(
+        &self,
+        expression: &SearchExpression,
+        limit: u32,
+        offset: u64,
+    ) -> Result<Vec<SearchResult>> {
         let mut values = Vec::new();
         let condition = compile_expression(expression, &mut values);
         let relevance = name_relevance_order(expression, &mut values);
+        values.push(Value::Integer(limit.clamp(1, 1000) as i64));
+        values.push(Value::Integer(offset.min(i64::MAX as u64) as i64));
         let sql = format!(
-            "SELECT path, name, extension, size_bytes FROM files WHERE {condition} ORDER BY {relevance}, name COLLATE NOCASE"
+            "SELECT path, name, extension, size_bytes FROM files
+             WHERE {condition}
+             ORDER BY {relevance}, name COLLATE NOCASE
+             LIMIT ?{} OFFSET ?{}",
+            values.len() - 1,
+            values.len()
         );
         let mut statement = self.connection.prepare(&sql)?;
         let rows = statement.query_map(params_from_iter(values.iter()), |row| {
@@ -502,6 +521,18 @@ impl Database {
             })
         })?;
         rows.collect()
+    }
+
+    /// Count all matches without loading their file records into memory.
+    pub fn count_search_results(&self, expression: &SearchExpression) -> Result<u64> {
+        let mut values = Vec::new();
+        let condition = compile_expression(expression, &mut values);
+        let count: i64 = self.connection.query_row(
+            &format!("SELECT COUNT(*) FROM files WHERE {condition}"),
+            params_from_iter(values.iter()),
+            |row| row.get(0),
+        )?;
+        Ok(count.max(0) as u64)
     }
 
     pub fn search_content(&self, term: &str) -> Result<Vec<SearchResult>> {
@@ -717,6 +748,30 @@ mod database_tests {
             results.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(),
             vec!["report.txt", "reporting-guide.txt", "annual report final.txt"]
         );
+    }
+
+    #[test]
+    fn paginates_search_results_and_counts_all_matches() {
+        let db = Database::open(":memory:").unwrap();
+        for name in ["report-a.txt", "report-b.txt", "report-c.txt", "notes.txt"] {
+            db.upsert_file(&sample_file(name, 10)).unwrap();
+        }
+        let expression = SearchExpression::NameContains("report".into());
+
+        assert_eq!(db.count_search_results(&expression).unwrap(), 3);
+        let first_page = db.search_page(&expression, 2, 0).unwrap();
+        let second_page = db.search_page(&expression, 2, 2).unwrap();
+
+        assert_eq!(
+            first_page.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(),
+            vec!["report-a.txt", "report-b.txt"]
+        );
+        assert_eq!(
+            second_page.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(),
+            vec!["report-c.txt"]
+        );
+        assert!(db.search_page(&expression, 0, 0).unwrap().len() <= 1);
+        assert!(db.search_page(&expression, 5000, 0).unwrap().len() <= 3);
     }
 
     #[test]
