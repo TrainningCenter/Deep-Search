@@ -41,27 +41,38 @@ impl SearchEngine {
             files_removed: 0,
         };
 
+        const INDEX_BATCH_SIZE: usize = 128;
         let mut indexing_failed = false;
-        for file in &scan.files {
-            match self.database.is_file_unchanged(file) {
-                Ok(true) => {
-                    report.files_unchanged += 1;
-                    continue;
+
+        for chunk in scan.files.chunks(INDEX_BATCH_SIZE) {
+            let mut pending_batch = Vec::with_capacity(chunk.len());
+
+            for file in chunk {
+                match self.database.is_file_unchanged(file) {
+                    Ok(true) => {
+                        report.files_unchanged += 1;
+                        continue;
+                    }
+                    Ok(false) => {}
+                    Err(_) => {
+                        report.errors += 1;
+                        indexing_failed = true;
+                        continue;
+                    }
                 }
-                Ok(false) => {}
-                Err(_) => {
-                    report.errors += 1;
-                    indexing_failed = true;
-                    continue;
-                }
+
+                let content = extract_text(&file.path, file.size_bytes);
+                pending_batch.push((file.clone(), content));
             }
 
-            let content = extract_text(&file.path, file.size_bytes);
-            match self.database.replace_file_with_content(file, content.as_deref()) {
-                Ok(()) => report.files_saved += 1,
-                Err(_) => {
-                    report.errors += 1;
-                    indexing_failed = true;
+            if !pending_batch.is_empty() {
+                let saved = pending_batch.len() as u64;
+                match self.database.replace_files_with_content_batch(&pending_batch) {
+                    Ok(()) => report.files_saved += saved,
+                    Err(_) => {
+                        report.errors += saved;
+                        indexing_failed = true;
+                    }
                 }
             }
         }
