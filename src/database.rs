@@ -14,6 +14,7 @@ pub struct SearchResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchExpression {
     NameContains(String),
+    PathContains(String),
     ContentContains(String),
     ExtensionEquals(String),
     SizeAtLeast(u64),
@@ -76,6 +77,14 @@ fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) ->
                 .replace('_', "\\_");
             values.push(Value::Text(format!("%{escaped}%")));
             format!("name LIKE ?{} ESCAPE '\\' COLLATE NOCASE", values.len())
+        }
+        SearchExpression::PathContains(term) => {
+            let escaped = term.trim()
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            values.push(Value::Text(format!("%{escaped}%")));
+            format!("path LIKE ?{} ESCAPE '\\' COLLATE NOCASE", values.len())
         }
         SearchExpression::ContentContains(term) => {
             let term = term.trim();
