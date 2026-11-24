@@ -107,3 +107,42 @@ impl SearchEngine {
         self.database.search_by_size_range(min_bytes, max_bytes)
     }
 }
+
+#[cfg(test)]
+mod content_indexing_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temporary_file(extension: &str, contents: &[u8]) -> std::path::PathBuf {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "deep-search-content-{}-{unique}.{extension}",
+            std::process::id()
+        ));
+        fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn reads_supported_utf8_text_files() {
+        let path = temporary_file("txt", "searchable document text".as_bytes());
+        let content = read_indexable_content(&path, 24);
+        assert_eq!(content.as_deref(), Some("searchable document text"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn skips_unsupported_binary_and_oversized_files() {
+        let binary = temporary_file("txt", b"hello\0world");
+        assert!(read_indexable_content(&binary, 11).is_none());
+        fs::remove_file(binary).unwrap();
+
+        let unsupported = temporary_file("pdf", b"%PDF-1.7");
+        assert!(read_indexable_content(&unsupported, 8).is_none());
+        fs::remove_file(unsupported).unwrap();
+
+        let large = temporary_file("txt", b"small");
+        assert!(read_indexable_content(&large, MAX_TEXT_FILE_SIZE + 1).is_none());
+        fs::remove_file(large).unwrap();
+    }
+}
