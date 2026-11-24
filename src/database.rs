@@ -49,6 +49,7 @@ impl Database {
             ON files(size_bytes);
             ",
         )?;
+
         Ok(())
     }
 
@@ -56,8 +57,9 @@ impl Database {
         let path = file.path.to_string_lossy().to_string();
         let size = file.size_bytes.min(i64::MAX as u64) as i64;
 
-        let modified = file.modified_unix
-            .map(|v| v.min(i64::MAX as u64) as i64);
+        let modified = file
+            .modified_unix
+            .map(|value| value.min(i64::MAX as u64) as i64);
 
         let status = match &file.status {
             IndexingStatus::Pending => "pending",
@@ -70,7 +72,7 @@ impl Database {
         self.connection.execute(
             "
             INSERT INTO files
-            (path, name, extension, size_bytes, modified_unix, status)
+                (path, name, extension, size_bytes, modified_unix, status)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             ON CONFLICT(path) DO UPDATE SET
                 name = excluded.name,
@@ -166,8 +168,8 @@ impl Database {
         min_bytes: Option<u64>,
         max_bytes: Option<u64>,
     ) -> Result<Vec<SearchResult>> {
-        let min_size = min_bytes.map(|v| v.min(i64::MAX as u64) as i64);
-        let max_size = max_bytes.map(|v| v.min(i64::MAX as u64) as i64);
+        let min_size = min_bytes.map(|value| value.min(i64::MAX as u64) as i64);
+        let max_size = max_bytes.map(|value| value.min(i64::MAX as u64) as i64);
 
         let mut statement = self.connection.prepare(
             "
@@ -179,17 +181,20 @@ impl Database {
             ",
         )?;
 
-        let rows = statement.query_map(params![min_size, max_size], |row| {
-            let path: String = row.get(0)?;
-            let size: i64 = row.get(3)?;
+        let rows = statement.query_map(
+            params![min_size, max_size],
+            |row| {
+                let path: String = row.get(0)?;
+                let size: i64 = row.get(3)?;
 
-            Ok(SearchResult {
-                path: path.into(),
-                name: row.get(1)?,
-                extension: row.get(2)?,
-                size_bytes: size.max(0) as u64,
-            })
-        })?;
+                Ok(SearchResult {
+                    path: path.into(),
+                    name: row.get(1)?,
+                    extension: row.get(2)?,
+                    size_bytes: size.max(0) as u64,
+                })
+            },
+        )?;
 
         rows.collect()
     }
@@ -214,16 +219,22 @@ mod database_tests {
     #[test]
     fn saves_and_counts_files() {
         let db = Database::open(":memory:").unwrap();
-        db.upsert_file(&sample_file("video.mp4", 5000)).unwrap();
+
+        db.upsert_file(&sample_file("video.mp4", 5000))
+            .unwrap();
+
         assert_eq!(db.file_count().unwrap(), 1);
     }
 
     #[test]
     fn searches_files_by_name() {
         let db = Database::open(":memory:").unwrap();
-        db.upsert_file(&sample_file("report.pdf", 1000)).unwrap();
+
+        db.upsert_file(&sample_file("report.pdf", 1000))
+            .unwrap();
 
         let results = db.search_by_name("report").unwrap();
+
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "report.pdf");
     }
@@ -231,9 +242,12 @@ mod database_tests {
     #[test]
     fn searches_files_by_extension() {
         let db = Database::open(":memory:").unwrap();
-        db.upsert_file(&sample_file("movie.mkv", 5000)).unwrap();
+
+        db.upsert_file(&sample_file("movie.mkv", 5000))
+            .unwrap();
 
         let results = db.search_by_extension(".mkv").unwrap();
+
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].extension.as_deref(), Some("mkv"));
     }
@@ -241,8 +255,12 @@ mod database_tests {
     #[test]
     fn searches_files_by_size() {
         let db = Database::open(":memory:").unwrap();
-        db.upsert_file(&sample_file("small.txt", 100)).unwrap();
-        db.upsert_file(&sample_file("large.txt", 5000)).unwrap();
+
+        db.upsert_file(&sample_file("small.txt", 100))
+            .unwrap();
+
+        db.upsert_file(&sample_file("large.txt", 5000))
+            .unwrap();
 
         let results = db
             .search_by_size_range(Some(1000), None)
