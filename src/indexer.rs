@@ -1,97 +1,161 @@
 use crate::{FileRecord, IndexingStatus};
-use std::fs;
+use std::fs::{self, ReadDir};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
+
+const DEFAULT_SCAN_BATCH_SIZE: usize = 128;
+
+#[derive(Debug, Default)]
+pub struct ScanSummary {
+    pub files_discovered: u64,
+    pub directories_scanned: u64,
+    pub errors: u64,
+    pub completed_roots: Vec<(PathBuf, bool)>,
+}
 
 #[derive(Debug, Default)]
 pub struct ScanReport {
     pub files: Vec<FileRecord>,
     pub directories_scanned: u64,
     pub errors: u64,
-    /// Roots that were traversed completely and are safe to reconcile.
     pub completed_roots: Vec<(PathBuf, bool)>,
 }
 
-pub fn scan_paths<P: AsRef<Path>>(paths: &[P]) -> ScanReport {
-    let mut report = ScanReport::default();
+/// Traverse roots depth-first, retaining directory iterators rather than every
+/// discovered file path. File metadata is delivered in bounded batches.
+pub fn scan_paths_batched<P, F>(
+    paths: &[P],
+    batch_size: usize,
+    mut on_batch: F,
+) -> ScanSummary
+where
+    P: AsRef<Path>,
+    F: FnMut(&[FileRecord]) -> bool,
+{
+    let mut summary = ScanSummary::default();
+    let batch_size = batch_size.max(1);
 
     for input in paths {
         let root = input.as_ref().to_path_buf();
-        let errors_before = report.errors;
+        let errors_before = summary.errors;
+        let mut callback_failed = false;
+
         let root_metadata = match fs::symlink_metadata(&root) {
             Ok(metadata) => metadata,
             Err(_) => {
-                report.errors += 1;
+                summary.errors += 1;
                 continue;
             }
         };
-
         if root_metadata.file_type().is_symlink() {
             continue;
         }
 
         let root_is_directory = root_metadata.is_dir();
-        let mut pending = vec![root.clone()];
+        let mut batch = Vec::with_capacity(batch_size);
+        let mut directories: Vec<(PathBuf, ReadDir)> = Vec::new();
 
-        while let Some(path) = pending.pop() {
-            let metadata = match fs::symlink_metadata(&path) {
-                Ok(metadata) => metadata,
-                Err(_) => {
-                    report.errors += 1;
-                    continue;
+        if root_is_directory {
+            match fs::read_dir(&root) {
+                Ok(entries) => {
+                    summary.directories_scanned += 1;
+                    directories.push((root.clone(), entries));
                 }
-            };
-
-            if metadata.file_type().is_symlink() {
-                continue;
+                Err(_) => summary.errors += 1,
             }
-
-            if metadata.is_dir() {
-                report.directories_scanned += 1;
-                let entries = match fs::read_dir(&path) {
-                    Ok(entries) => entries,
-                    Err(_) => {
-                        report.errors += 1;
-                        continue;
-                    }
-                };
-
-                for entry in entries {
-                    match entry {
-                        Ok(entry) => pending.push(entry.path()),
-                        Err(_) => report.errors += 1,
-                    }
-                }
-                continue;
-            }
-
-            if metadata.is_file() {
-                let name = path.file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let extension = path.extension()
-                    .map(|ext| ext.to_string_lossy().to_lowercase());
-                let modified_unix = metadata.modified().ok()
-                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-                    .map(|duration| duration.as_secs());
-
-                report.files.push(FileRecord {
-                    path,
-                    name,
-                    extension,
-                    size_bytes: metadata.len(),
-                    modified_unix,
-                    status: IndexingStatus::Pending,
-                });
+        } else if root_metadata.is_file() {
+            if let Some(record) = file_record(root.clone(), &root_metadata) {
+                summary.files_discovered += 1;
+                batch.push(record);
             }
         }
 
-        if report.errors == errors_before {
-            report.completed_roots.push((root, root_is_directory));
+        while let Some((directory, entries)) = directories.last_mut() {
+            match entries.next() {
+                Some(Ok(entry)) => {
+                    let path = entry.path();
+                    let metadata = match fs::symlink_metadata(&path) {
+                        Ok(metadata) => metadata,
+                        Err(_) => {
+                            summary.errors += 1;
+                            continue;
+                        }
+                    };
+                    if metadata.file_type().is_symlink() {
+                        continue;
+                    }
+                    if metadata.is_dir() {
+                        match fs::read_dir(&path) {
+                            Ok(children) => {
+                                summary.directories_scanned += 1;
+                                directories.push((path, children));
+                            }
+                            Err(_) => summary.errors += 1,
+                        }
+                    } else if metadata.is_file() {
+                        if let Some(record) = file_record(path, &metadata) {
+                            summary.files_discovered += 1;
+                            batch.push(record);
+                            if batch.len() >= batch_size {
+                                if !on_batch(&batch) {
+                                    summary.errors += 1;
+                                    callback_failed = true;
+                                }
+                                batch.clear();
+                            }
+                        }
+                    }
+                }
+                Some(Err(_)) => summary.errors += 1,
+                None => {
+                    directories.pop();
+                }
+            }
+            let _ = directory;
+        }
+
+        if !batch.is_empty() && !on_batch(&batch) {
+            summary.errors += 1;
+            callback_failed = true;
+        }
+
+        if summary.errors == errors_before && !callback_failed {
+            summary.completed_roots.push((root, root_is_directory));
         }
     }
 
+    summary
+}
+
+fn file_record(path: PathBuf, metadata: &fs::Metadata) -> Option<FileRecord> {
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    let extension = path.extension().map(|ext| ext.to_string_lossy().to_lowercase());
+    let modified_unix = metadata.modified().ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs());
+
+    Some(FileRecord {
+        path,
+        name,
+        extension,
+        size_bytes: metadata.len(),
+        modified_unix,
+        status: IndexingStatus::Pending,
+    })
+}
+
+/// Compatibility helper used by tests and callers that explicitly need a
+/// complete in-memory report. The indexing engine uses the streaming API.
+pub fn scan_paths<P: AsRef<Path>>(paths: &[P]) -> ScanReport {
+    let mut report = ScanReport::default();
+    let summary = scan_paths_batched(paths, DEFAULT_SCAN_BATCH_SIZE, |batch| {
+        report.files.extend_from_slice(batch);
+        true
+    });
     report.files.sort_by(|left, right| left.path.cmp(&right.path));
+    report.directories_scanned = summary.directories_scanned;
+    report.errors = summary.errors;
+    report.completed_roots = summary.completed_roots;
     report
 }
 
