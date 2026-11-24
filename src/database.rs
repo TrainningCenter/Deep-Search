@@ -105,13 +105,22 @@ impl Database {
     }
 
     pub fn search_by_name(&self, term: &str) -> Result<Vec<SearchResult>> {
-        let pattern = format!("%{}%", term);
+        let term = term.trim();
+        if term.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let escaped = term
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let pattern = format!("%{}%", escaped);
 
         let mut statement = self.connection.prepare(
             "
             SELECT path, name, extension, size_bytes
             FROM files
-            WHERE name LIKE ?1 COLLATE NOCASE
+            WHERE name LIKE ?1 ESCAPE '\\' COLLATE NOCASE
             ORDER BY name COLLATE NOCASE
             ",
         )?;
@@ -237,6 +246,28 @@ mod database_tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "report.pdf");
+    }
+
+
+    #[test]
+    fn searches_percent_and_underscore_as_literal_characters() {
+        let db = Database::open(":memory:").unwrap();
+
+        db.upsert_file(&sample_file("100%_complete.txt", 100)).unwrap();
+        db.upsert_file(&sample_file("100X_complete.txt", 100)).unwrap();
+
+        let results = db.search_by_name("100%_").unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "100%_complete.txt");
+    }
+
+    #[test]
+    fn empty_name_search_returns_no_results() {
+        let db = Database::open(":memory:").unwrap();
+        db.upsert_file(&sample_file("report.pdf", 1000)).unwrap();
+
+        assert!(db.search_by_name("   ").unwrap().is_empty());
     }
 
     #[test]
