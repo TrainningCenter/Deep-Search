@@ -23,6 +23,50 @@ pub enum SearchExpression {
     Not(Box<SearchExpression>),
 }
 
+fn collect_name_terms<'a>(expression: &'a SearchExpression, terms: &mut Vec<&'a str>) {
+    match expression {
+        SearchExpression::NameContains(term) => terms.push(term.trim()),
+        SearchExpression::And(items) | SearchExpression::Or(items) => {
+            for item in items {
+                collect_name_terms(item, terms);
+            }
+        }
+        SearchExpression::Not(inner) => collect_name_terms(inner, terms),
+        _ => {}
+    }
+}
+
+fn name_relevance_order(expression: &SearchExpression, values: &mut Vec<Value>) -> String {
+    let mut terms = Vec::new();
+    collect_name_terms(expression, &mut terms);
+    if terms.is_empty() {
+        return "name COLLATE NOCASE".to_string();
+    }
+
+    let mut scores = Vec::new();
+    for term in terms {
+        let exact_index = values.len() + 1;
+        values.push(Value::Text(term.to_string()));
+        let prefix_index = values.len() + 1;
+        let escaped = term
+            .replace('\\\\', "\\\\\\\\")
+            .replace('%', "\\\\%")
+            .replace('_', "\\\\_");
+        values.push(Value::Text(format!("{escaped}%")));
+        scores.push(format!(
+            "CASE WHEN name = ?{exact_index} COLLATE NOCASE THEN 0
+                  WHEN name LIKE ?{prefix_index} ESCAPE '\\\\' COLLATE NOCASE THEN 1
+                  ELSE 2 END"
+        ));
+    }
+
+    if scores.len() == 1 {
+        scores.remove(0)
+    } else {
+        format!("MIN({})", scores.join(", "))
+    }
+}
+
 fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) -> String {
     match expression {
         SearchExpression::NameContains(term) => {
@@ -442,8 +486,9 @@ impl Database {
     pub fn search(&self, expression: &SearchExpression) -> Result<Vec<SearchResult>> {
         let mut values = Vec::new();
         let condition = compile_expression(expression, &mut values);
+        let relevance = name_relevance_order(expression, &mut values);
         let sql = format!(
-            "SELECT path, name, extension, size_bytes FROM files WHERE {condition} ORDER BY name COLLATE NOCASE"
+            "SELECT path, name, extension, size_bytes FROM files WHERE {condition} ORDER BY {relevance}, name COLLATE NOCASE"
         );
         let mut statement = self.connection.prepare(&sql)?;
         let rows = statement.query_map(params_from_iter(values.iter()), |row| {
@@ -637,6 +682,34 @@ mod database_tests {
             .unwrap();
 
         assert_eq!(db.file_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn ranks_exact_and_prefix_name_matches_before_substrings() {
+        let db = Database::open(":memory:").unwrap();
+        db.upsert_file(&sample_file("annual report final.txt", 10)).unwrap();
+        db.upsert_file(&sample_file("reporting-guide.txt", 10)).unwrap();
+        db.upsert_file(&sample_file("report.txt", 10)).unwrap();
+
+        let results = db.search_by_name("report").unwrap();
+        assert_eq!(
+            results.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(),
+            vec!["report.txt", "reporting-guide.txt", "annual report final.txt"]
+        );
+    }
+
+    #[test]
+    fn ranks_name_matches_inside_compound_search_expressions() {
+        let db = Database::open(":memory:").unwrap();
+        db.upsert_file(&sample_file("annual report final.txt", 10)).unwrap();
+        db.upsert_file(&sample_file("reporting-guide.txt", 10)).unwrap();
+        db.upsert_file(&sample_file("report.txt", 10)).unwrap();
+
+        let results = db.search(&SearchExpression::NameContains("report".into())).unwrap();
+        assert_eq!(
+            results.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(),
+            vec!["report.txt", "reporting-guide.txt", "annual report final.txt"]
+        );
     }
 
     #[test]
