@@ -186,6 +186,50 @@ impl Database {
         Ok(())
     }
 
+    /// Persist a group of extracted records in one SQLite transaction.
+    pub fn replace_files_with_content_batch(
+        &self,
+        files: &[(FileRecord, Option<String>)],
+    ) -> Result<()> {
+        if files.is_empty() {
+            return Ok(());
+        }
+
+        let transaction = self.connection.unchecked_transaction()?;
+        {
+            let mut statement = transaction.prepare(
+                "INSERT INTO files
+                    (path, name, extension, size_bytes, modified_unix, status, content)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(path) DO UPDATE SET
+                    name = excluded.name,
+                    extension = excluded.extension,
+                    size_bytes = excluded.size_bytes,
+                    modified_unix = excluded.modified_unix,
+                    status = excluded.status,
+                    content = excluded.content"
+            )?;
+
+            for (file, content) in files {
+                let path = file.path.to_string_lossy().to_string();
+                let size = file.size_bytes.min(i64::MAX as u64) as i64;
+                let modified = file.modified_unix.map(|value| value.min(i64::MAX as u64) as i64);
+                let status = match &file.status {
+                    IndexingStatus::Pending => "pending",
+                    IndexingStatus::Indexing => "indexing",
+                    IndexingStatus::Indexed => "indexed",
+                    IndexingStatus::Skipped => "skipped",
+                    IndexingStatus::Failed => "failed",
+                };
+                statement.execute(params![
+                    path, file.name, file.extension, size, modified, status, content
+                ])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Returns true when size and modification time match the stored record.
     pub fn is_file_unchanged(&self, file: &FileRecord) -> Result<bool> {
         let path = file.path.to_string_lossy().to_string();
