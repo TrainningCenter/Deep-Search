@@ -134,6 +134,34 @@ mod content_indexing_tests {
     }
 
     #[test]
+    fn removes_deleted_files_after_a_complete_rescan() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "deep-search-reconcile-{}-{unique}",
+            std::process::id()
+        ));
+        let scan_root = base.join("data");
+        fs::create_dir_all(&scan_root).unwrap();
+        let file_path = scan_root.join("temporary.txt");
+        fs::write(&file_path, b"indexed once").unwrap();
+
+        let engine = SearchEngine::open(base.join("index.sqlite")).unwrap();
+        let first = engine.index_paths(&[scan_root.as_path()]);
+        assert_eq!(first.errors, 0);
+        assert_eq!(first.files_saved, 1);
+        assert_eq!(engine.indexed_file_count().unwrap(), 1);
+
+        fs::remove_file(&file_path).unwrap();
+        let second = engine.index_paths(&[scan_root.as_path()]);
+        assert_eq!(second.errors, 0);
+        assert_eq!(second.files_removed, 1);
+        assert_eq!(engine.indexed_file_count().unwrap(), 0);
+
+        drop(engine);
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
     fn skips_unsupported_binary_and_oversized_files() {
         let binary = temporary_file("txt", b"hello\0world");
         assert!(extract_text(&binary, 11).is_none());
