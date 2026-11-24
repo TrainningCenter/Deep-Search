@@ -108,6 +108,17 @@ impl Database {
 
             CREATE INDEX IF NOT EXISTS idx_files_size
             ON files(size_bytes);
+
+            CREATE TABLE IF NOT EXISTS scan_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT
+            );
+
+            CREATE TABLE IF NOT EXISTS scan_seen_paths (
+                session_id INTEGER NOT NULL REFERENCES scan_sessions(id) ON DELETE CASCADE,
+                path TEXT NOT NULL,
+                PRIMARY KEY(session_id, path)
+            );
+
             ",
         )?;
 
@@ -242,6 +253,81 @@ impl Database {
             |row| row.get(0),
         ).optional()?;
         Ok(unchanged.unwrap_or(false))
+    }
+
+    /// Start a scan whose discovered paths are recorded incrementally.
+    pub fn begin_scan(&self) -> Result<i64> {
+        self.connection.execute("INSERT INTO scan_sessions DEFAULT VALUES", [])?;
+        Ok(self.connection.last_insert_rowid())
+    }
+
+    /// Mark a bounded batch of discovered paths as present in this scan.
+    pub fn mark_scan_seen(&self, scan_id: i64, files: &[FileRecord]) -> Result<()> {
+        if files.is_empty() {
+            return Ok(());
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        {
+            let mut statement = transaction.prepare(
+                "INSERT OR IGNORE INTO scan_seen_paths(session_id, path) VALUES (?1, ?2)"
+            )?;
+            for file in files {
+                statement.execute(params![scan_id, file.path.to_string_lossy().as_ref()])?;
+            }
+        }
+        transaction.commit()
+    }
+
+    /// Remove records missing from completed roots, then discard scan markers.
+    pub fn finish_scan(
+        &self,
+        scan_id: i64,
+        roots: &[(std::path::PathBuf, bool)],
+    ) -> Result<u64> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let mut deleted = 0_u64;
+
+        for (root, is_directory) in roots {
+            let root_text = root.to_string_lossy().into_owned();
+            let prefix = if *is_directory {
+                format!("{}{}", root_text.trim_end_matches(std::path::MAIN_SEPARATOR), std::path::MAIN_SEPARATOR)
+            } else {
+                root_text.clone()
+            };
+
+            let affected = if *is_directory {
+                transaction.execute(
+                    "DELETE FROM files
+                     WHERE substr(path, 1, length(?1)) = ?1
+                       AND NOT EXISTS (
+                           SELECT 1 FROM scan_seen_paths seen
+                           WHERE seen.session_id = ?2 AND seen.path = files.path
+                       )",
+                    params![prefix, scan_id],
+                )?
+            } else {
+                transaction.execute(
+                    "DELETE FROM files
+                     WHERE path = ?1
+                       AND NOT EXISTS (
+                           SELECT 1 FROM scan_seen_paths seen
+                           WHERE seen.session_id = ?2 AND seen.path = files.path
+                       )",
+                    params![root_text, scan_id],
+                )?
+            };
+            deleted += affected as u64;
+        }
+
+        transaction.execute("DELETE FROM scan_sessions WHERE id = ?1", [scan_id])?;
+        transaction.commit()?;
+        Ok(deleted)
+    }
+
+    /// Discard markers after an incomplete or failed scan without pruning files.
+    pub fn discard_scan(&self, scan_id: i64) -> Result<()> {
+        self.connection.execute("DELETE FROM scan_sessions WHERE id = ?1", [scan_id])?;
+        Ok(())
     }
 
     /// Remove stale records only inside roots whose scans completed successfully.
