@@ -49,7 +49,6 @@ impl Database {
             ON files(size_bytes);
             ",
         )?;
-
         Ok(())
     }
 
