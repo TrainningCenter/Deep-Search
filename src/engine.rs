@@ -1,4 +1,4 @@
-use crate::database::Database;
+use crate::database::{Database, SearchResult};
 use crate::indexer::scan_paths;
 use rusqlite::Result;
 use std::path::Path;
@@ -46,5 +46,9 @@ impl SearchEngine {
 
     pub fn indexed_file_count(&self) -> Result<u64> {
         self.database.file_count()
+    }
+
+    pub fn search_by_name(&self, term: &str) -> Result<Vec<SearchResult>> {
+        self.database.search_by_name(term)
     }
 }
