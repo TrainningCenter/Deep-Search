@@ -70,8 +70,9 @@ where
             }
         }
 
-        while let Some((directory, entries)) = directories.last_mut() {
-            match entries.next() {
+        while !directories.is_empty() {
+            let next_entry = directories.last_mut().and_then(|(_, entries)| entries.next());
+            match next_entry {
                 Some(Ok(entry)) => {
                     let path = entry.path();
                     let metadata = match fs::symlink_metadata(&path) {
@@ -111,7 +112,6 @@ where
                     directories.pop();
                 }
             }
-            let _ = directory;
         }
 
         if !batch.is_empty() && !on_batch(&batch) {
@@ -196,6 +196,27 @@ mod tests {
         assert_eq!(report.files[1].extension.as_deref(), Some("mkv"));
         assert_eq!(report.files[1].size_bytes, 10);
         assert_eq!(report.completed_roots, vec![(root.clone(), true)]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn streams_files_in_batches_without_exceeding_requested_size() {
+        let root = create_temp_dir();
+        for index in 0..17 {
+            fs::write(root.join(format!("file-{index:02}.txt")), b"x").unwrap();
+        }
+
+        let mut batch_sizes = Vec::new();
+        let report = scan_paths_batched(&[root.as_path()], 4, |batch| {
+            batch_sizes.push(batch.len());
+            true
+        });
+
+        assert_eq!(report.files_discovered, 17);
+        assert_eq!(report.errors, 0);
+        assert_eq!(batch_sizes.iter().sum::<usize>(), 17);
+        assert!(batch_sizes.iter().all(|size| *size <= 4));
+        assert_eq!(batch_sizes, vec![4, 4, 4, 4, 1]);
         fs::remove_dir_all(root).unwrap();
     }
 
