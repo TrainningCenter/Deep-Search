@@ -565,6 +565,22 @@ mod database_tests {
     }
 
     #[test]
+    fn saves_multiple_files_with_content_in_one_batch() {
+        let db = Database::open(":memory:").unwrap();
+        let first = sample_file("first.txt", 5);
+        let second = sample_file("second.txt", 6);
+        let batch = vec![
+            (first, Some("first searchable text".to_string())),
+            (second, Some("second searchable text".to_string())),
+        ];
+
+        db.replace_files_with_content_batch(&batch).unwrap();
+
+        assert_eq!(db.file_count().unwrap(), 2);
+        assert_eq!(db.search_content("searchable").unwrap().len(), 2);
+    }
+
+    #[test]
     fn detects_unchanged_files_using_size_and_modification_time() {
         let db = Database::open(":memory:").unwrap();
         let file = sample_file("stable.txt", 128);
