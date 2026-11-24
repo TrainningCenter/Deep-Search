@@ -2,7 +2,37 @@
 use crate::database::{Database, SearchExpression, SearchResult};
 use crate::indexer::scan_paths;
 use rusqlite::Result;
+use std::fs;
 use std::path::Path;
+
+const MAX_TEXT_FILE_SIZE: u64 = 1024 * 1024;
+
+fn read_indexable_content(path: &Path, size_bytes: u64) -> Option<String> {
+    if size_bytes > MAX_TEXT_FILE_SIZE {
+        return None;
+    }
+
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    let supported = matches!(
+        extension.as_str(),
+        "txt" | "md" | "markdown" | "log" | "csv" | "tsv" |
+        "json" | "jsonl" | "xml" | "html" | "htm" | "css" |
+        "js" | "jsx" | "ts" | "tsx" | "rs" | "toml" |
+        "yaml" | "yml" | "ini" | "conf" | "cfg" | "sql" |
+        "py" | "sh" | "bash" | "c" | "h" | "cpp" | "hpp" |
+        "java" | "go" | "php" | "rb" | "swift" | "kt" |
+        "env" | "rst" | "tex"
+    );
+    if !supported {
+        return None;
+    }
+
+    let content = fs::read_to_string(path).ok()?;
+    if content.contains('\0') {
+        return None;
+    }
+    Some(content)
+}
 
 #[derive(Debug, Default)]
 pub struct IndexingReport {
@@ -36,7 +66,8 @@ impl SearchEngine {
         };
 
         for file in &scan.files {
-            match self.database.upsert_file(file) {
+            let content = read_indexable_content(&file.path, file.size_bytes);
+            match self.database.upsert_file_with_content(file, content.as_deref()) {
                 Ok(()) => report.files_saved += 1,
                 Err(_) => report.errors += 1,
             }
@@ -51,6 +82,10 @@ impl SearchEngine {
 
     pub fn search(&self, expression: &SearchExpression) -> Result<Vec<SearchResult>> {
         self.database.search(expression)
+    }
+
+    pub fn search_content(&self, term: &str) -> Result<Vec<SearchResult>> {
+        self.database.search_content(term)
     }
 
     pub fn search_by_name(&self, term: &str) -> Result<Vec<SearchResult>> {
