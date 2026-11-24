@@ -107,6 +107,21 @@ impl SearchEngine {
         self.database.search(expression)
     }
 
+    /// Search a bounded result page. The database enforces a maximum page size
+    /// of 1000 records.
+    pub fn search_page(
+        &self,
+        expression: &SearchExpression,
+        limit: u32,
+        offset: u64,
+    ) -> Result<Vec<SearchResult>> {
+        self.database.search_page(expression, limit, offset)
+    }
+
+    pub fn count_search_results(&self, expression: &SearchExpression) -> Result<u64> {
+        self.database.count_search_results(expression)
+    }
+
     pub fn search_content(&self, term: &str) -> Result<Vec<SearchResult>> {
         self.database.search_content(term)
     }
