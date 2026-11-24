@@ -22,7 +22,8 @@ pub struct FileRecord {
     pub name: String,
     pub extension: Option<String>,
     pub size_bytes: u64,
-    pub modified_unix: Option<u64>,
+    /// File modification timestamp in nanoseconds since the Unix epoch.
+    pub modified_timestamp_ns: Option<u64>,
     pub status: IndexingStatus,
 }
 
@@ -43,7 +44,7 @@ mod tests {
             name: "report.pdf".into(),
             extension: Some("pdf".into()),
             size_bytes: 1024,
-            modified_unix: None,
+            modified_timestamp_ns: None,
             status: IndexingStatus::Pending,
         };
 
