@@ -3,7 +3,6 @@ use crate::content::extract_text;
 use crate::database::{Database, SearchExpression, SearchResult};
 use crate::indexer::scan_paths;
 use rusqlite::Result;
-use std::fs;
 use std::path::Path;
 
 
@@ -84,6 +83,7 @@ impl SearchEngine {
 #[cfg(test)]
 mod content_indexing_tests {
     use super::*;
+    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temporary_file(extension: &str, contents: &[u8]) -> std::path::PathBuf {
@@ -99,7 +99,7 @@ mod content_indexing_tests {
     #[test]
     fn reads_supported_utf8_text_files() {
         let path = temporary_file("txt", "searchable document text".as_bytes());
-        let content = read_indexable_content(&path, 24);
+        let content = extract_text(&path, 24);
         assert_eq!(content.as_deref(), Some("searchable document text"));
         fs::remove_file(path).unwrap();
     }
@@ -107,15 +107,15 @@ mod content_indexing_tests {
     #[test]
     fn skips_unsupported_binary_and_oversized_files() {
         let binary = temporary_file("txt", b"hello\0world");
-        assert!(read_indexable_content(&binary, 11).is_none());
+        assert!(extract_text(&binary, 11).is_none());
         fs::remove_file(binary).unwrap();
 
         let unsupported = temporary_file("pdf", b"%PDF-1.7");
-        assert!(read_indexable_content(&unsupported, 8).is_none());
+        assert!(extract_text(&unsupported, 8).is_none());
         fs::remove_file(unsupported).unwrap();
 
         let large = temporary_file("txt", b"small");
-        assert!(read_indexable_content(&large, MAX_TEXT_FILE_SIZE + 1).is_none());
+        assert!(extract_text(&large, 1024 * 1024 + 1).is_none());
         fs::remove_file(large).unwrap();
     }
 }
