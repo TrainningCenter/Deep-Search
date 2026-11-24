@@ -706,6 +706,56 @@ mod database_tests {
     }
 
     #[test]
+    fn trigram_content_search_matches_substrings_case_insensitively() {
+        let db = Database::open(":memory:").unwrap();
+        db.upsert_file_with_content(
+            &sample_file("notes.txt", 42),
+            Some("The quick brown fox jumps over the lazy dog"),
+        ).unwrap();
+
+        let results = db.search_content("BROWN FOX").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "notes.txt");
+
+        let expression = SearchExpression::ContentContains("quick brown".into());
+        assert_eq!(db.search(&expression).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn content_search_falls_back_for_terms_shorter_than_three_characters() {
+        let db = Database::open(":memory:").unwrap();
+        db.upsert_file_with_content(
+            &sample_file("short.txt", 12),
+            Some("an ox in a box"),
+        ).unwrap();
+
+        assert_eq!(db.search_content("ox").unwrap().len(), 1);
+        assert_eq!(
+            db.search(&SearchExpression::ContentContains("ox".into())).unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
+    fn content_fts_stays_synchronized_after_update_and_delete() {
+        let db = Database::open(":memory:").unwrap();
+        let file = sample_file("mutable.txt", 10);
+        db.upsert_file_with_content(&file, Some("old searchable phrase")).unwrap();
+
+        let mut changed = file.clone();
+        changed.size_bytes = 20;
+        db.replace_file_with_content(&changed, Some("new searchable phrase")).unwrap();
+
+        assert!(db.search_content("old searchable").unwrap().is_empty());
+        assert_eq!(db.search_content("new searchable").unwrap().len(), 1);
+
+        let root = std::path::PathBuf::from("/test");
+        let deleted = db.prune_missing_files(&[(root, true)], &[]).unwrap();
+        assert_eq!(deleted, 1);
+        assert!(db.search_content("new searchable").unwrap().is_empty());
+    }
+
+    #[test]
     fn saves_multiple_files_with_content_in_one_batch() {
         let db = Database::open(":memory:").unwrap();
         let first = sample_file("first.txt", 5);
