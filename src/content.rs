@@ -86,6 +86,73 @@ fn extract_office_text(path: &Path, entry_name: &str) -> Option<String> {
     extract_xml_text(&xml)
 }
 
+/// Extract text from multiple XML parts in presentation and spreadsheet archives.
+/// The archive is validated as a whole before any XML part is read.
+fn extract_archive_xml_parts<F>(path: &Path, mut matches: F) -> Option<String>
+where
+    F: FnMut(&str) -> bool,
+{
+    let file = File::open(path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+
+    if archive.len() > MAX_ARCHIVE_ENTRIES {
+        return None;
+    }
+
+    let mut total_uncompressed = 0_u64;
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index).ok()?;
+        total_uncompressed = total_uncompressed.checked_add(entry.size())?;
+        if total_uncompressed > MAX_ARCHIVE_UNCOMPRESSED_SIZE {
+            return None;
+        }
+    }
+
+    let mut output = String::new();
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).ok()?;
+        let name = entry.name().to_string();
+        if !matches(&name) || entry.size() > MAX_XML_SIZE {
+            continue;
+        }
+
+        let mut xml = String::with_capacity(entry.size() as usize);
+        entry
+            .by_ref()
+            .take(MAX_XML_SIZE + 1)
+            .read_to_string(&mut xml)
+            .ok()?;
+        if xml.len() as u64 > MAX_XML_SIZE {
+            return None;
+        }
+
+        if let Some(part_text) = extract_xml_text(&xml) {
+            if !output.is_empty() {
+                output.push(' ');
+            }
+            output.push_str(&part_text);
+            if output.len() >= MAX_EXTRACTED_TEXT_SIZE {
+                break;
+            }
+        }
+    }
+
+    limit_text(output)
+}
+
+fn extract_powerpoint_text(path: &Path) -> Option<String> {
+    extract_archive_xml_parts(path, |name| {
+        name.starts_with("ppt/slides/slide") && name.ends_with(".xml")
+    })
+}
+
+fn extract_spreadsheet_text(path: &Path) -> Option<String> {
+    extract_archive_xml_parts(path, |name| {
+        name == "xl/sharedStrings.xml"
+            || (name.starts_with("xl/worksheets/sheet") && name.ends_with(".xml"))
+    })
+}
+
 /// Extract searchable text from supported document formats.
 /// Plain text is limited to 1 MiB; PDF and office archives have stricter
 /// input, archive-entry, decompressed-size, and output limits.
@@ -127,6 +194,18 @@ pub fn extract_text(path: &Path, size_bytes: u64) -> Option<String> {
                 return None;
             }
             extract_office_text(path, "content.xml")
+        }
+        "pptx" => {
+            if size_bytes > MAX_ARCHIVE_SIZE {
+                return None;
+            }
+            extract_powerpoint_text(path)
+        }
+        "xlsx" => {
+            if size_bytes > MAX_ARCHIVE_SIZE {
+                return None;
+            }
+            extract_spreadsheet_text(path)
         }
         _ => None,
     }
