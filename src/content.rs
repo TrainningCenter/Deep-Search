@@ -26,6 +26,201 @@ fn limit_text(mut text: String) -> Option<String> {
     }
 }
 
+/// Extract readable text from RTF while ignoring formatting controls and
+/// non-document destinations such as font tables, metadata, and embedded images.
+fn extract_rtf_text(rtf: &str) -> Option<String> {
+    #[derive(Clone, Copy)]
+    struct GroupState {
+        skip: bool,
+        unicode_fallback: usize,
+    }
+
+    fn skip_fallback(bytes: &[u8], mut index: usize, count: usize) -> usize {
+        for _ in 0..count {
+            if index >= bytes.len() {
+                break;
+            }
+            if bytes[index] == b'\\\\' {
+                index += 1;
+                if index >= bytes.len() {
+                    break;
+                }
+                if bytes[index] == b'\'' {
+                    index = (index + 3).min(bytes.len());
+                } else if bytes[index].is_ascii_alphabetic() {
+                    while index < bytes.len() && bytes[index].is_ascii_alphabetic() {
+                        index += 1;
+                    }
+                    if index < bytes.len() && (bytes[index] == b'-' || bytes[index].is_ascii_digit()) {
+                        index += 1;
+                        while index < bytes.len() && bytes[index].is_ascii_digit() {
+                            index += 1;
+                        }
+                    }
+                    if index < bytes.len() && bytes[index] == b' ' {
+                        index += 1;
+                    }
+                } else {
+                    index += 1;
+                }
+            } else {
+                index += 1;
+            }
+        }
+        index
+    }
+
+    const SKIPPED_DESTINATIONS: &[&str] = &[
+        "fonttbl", "colortbl", "stylesheet", "info", "pict", "object",
+        "header", "headerl", "headerr", "footer", "footerl", "footerr",
+        "generator", "datastore", "themedata", "xmlnstbl", "listtable",
+        "listoverridetable",
+    ];
+
+    let bytes = rtf.as_bytes();
+    let mut output = String::new();
+    let mut state = GroupState { skip: false, unicode_fallback: 1 };
+    let mut stack = Vec::new();
+    let mut index = 0;
+
+    while index < bytes.len() && output.len() < MAX_EXTRACTED_TEXT_SIZE {
+        match bytes[index] {
+            b'{' => {
+                stack.push(state);
+                index += 1;
+            }
+            b'}' => {
+                if let Some(previous) = stack.pop() {
+                    state = previous;
+                }
+                index += 1;
+            }
+            b'\\\\' => {
+                index += 1;
+                if index >= bytes.len() {
+                    break;
+                }
+
+                let symbol = bytes[index];
+                if symbol == b'\\\\' || symbol == b'{' || symbol == b'}' {
+                    if !state.skip {
+                        output.push(symbol as char);
+                    }
+                    index += 1;
+                    continue;
+                }
+                if symbol == b'\'' && index + 2 < bytes.len() {
+                    if !state.skip {
+                        if let Ok(value) = u8::from_str_radix(
+                            std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or(""),
+                            16,
+                        ) {
+                            output.push(char::from(value));
+                        }
+                    }
+                    index += 3;
+                    continue;
+                }
+                if symbol == b'*' {
+                    state.skip = true;
+                    index += 1;
+                    continue;
+                }
+                if symbol == b'~' {
+                    if !state.skip { output.push(' '); }
+                    index += 1;
+                    continue;
+                }
+                if symbol == b'_' {
+                    if !state.skip { output.push('-'); }
+                    index += 1;
+                    continue;
+                }
+                if symbol == b'-' {
+                    index += 1;
+                    continue;
+                }
+                if !symbol.is_ascii_alphabetic() {
+                    index += 1;
+                    continue;
+                }
+
+                let word_start = index;
+                while index < bytes.len() && bytes[index].is_ascii_alphabetic() {
+                    index += 1;
+                }
+                let word = std::str::from_utf8(&bytes[word_start..index]).ok()?;
+                let number_start = index;
+                if index < bytes.len() && bytes[index] == b'-' {
+                    index += 1;
+                }
+                while index < bytes.len() && bytes[index].is_ascii_digit() {
+                    index += 1;
+                }
+                let number = if index > number_start {
+                    std::str::from_utf8(&bytes[number_start..index]).ok()?.parse::<i32>().ok()
+                } else {
+                    None
+                };
+                if index < bytes.len() && bytes[index] == b' ' {
+                    index += 1;
+                }
+
+                if SKIPPED_DESTINATIONS.contains(&word) {
+                    state.skip = true;
+                } else if word == "uc" {
+                    if let Some(value) = number {
+                        state.unicode_fallback = value.max(0) as usize;
+                    }
+                } else if word == "u" {
+                    if !state.skip {
+                        if let Some(value) = number {
+                            let code_unit = value as i16 as u16;
+                            if let Some(character) = char::from_u32(code_unit as u32) {
+                                output.push(character);
+                            }
+                        }
+                    }
+                    index = skip_fallback(bytes, index, state.unicode_fallback);
+                } else if word == "bin" {
+                    if let Some(length) = number {
+                        index = index.saturating_add(length.max(0) as usize).min(bytes.len());
+                    }
+                } else if !state.skip {
+                    match word {
+                        "par" | "line" => output.push('\n'),
+                        "tab" => output.push('\t'),
+                        "emdash" => output.push('—'),
+                        "endash" => output.push('–'),
+                        "bullet" => output.push('•'),
+                        "lquote" => output.push('‘'),
+                        "rquote" => output.push('’'),
+                        "ldblquote" => output.push('“'),
+                        "rdblquote" => output.push('”'),
+                        _ => {}
+                    }
+                }
+            }
+            byte if !state.skip => {
+                let remaining = std::str::from_utf8(&bytes[index..]).ok()?;
+                let character = remaining.chars().next()?;
+                output.push(character);
+                index += character.len_utf8();
+                if output.len() >= MAX_EXTRACTED_TEXT_SIZE {
+                    break;
+                }
+                continue;
+            }
+            _ => {
+                index += 1;
+                continue;
+            }
+        }
+    }
+
+    limit_text(output)
+}
+
 fn extract_xml_text(xml: &str) -> Option<String> {
     let document = roxmltree::Document::parse(xml).ok()?;
     let mut output = String::new();
@@ -183,6 +378,13 @@ pub fn extract_text(path: &Path, size_bytes: u64) -> Option<String> {
             let text = pdf_extract::extract_text(path).ok()?;
             limit_text(text)
         }
+        "rtf" => {
+            if size_bytes > MAX_PLAIN_TEXT_SIZE {
+                return None;
+            }
+            let content = fs::read_to_string(path).ok()?;
+            extract_rtf_text(&content)
+        }
         "docx" => {
             if size_bytes > MAX_ARCHIVE_SIZE {
                 return None;
@@ -310,6 +512,26 @@ mod tests {
             }
             fs::remove_file(path).unwrap();
         }
+    }
+
+    #[test]
+    fn extracts_rtf_text_and_ignores_formatting_destinations() {
+        let rtf = r#"{\\rtf1\\ansi This is \\b bold\\b0 text.\\par
+{\\fonttbl{\\f0 Arial;}}{\\*\\generator HiddenGenerator;}
+Arabic: \\u1605?\\u1585?\\u1581?\\u1576?\\u1575?\\par
+Escaped: \\{literal\\} and \\~ space.}"#;
+        let text = extract_rtf_text(rtf).unwrap();
+
+        assert!(text.contains("This is bold text."));
+        assert!(text.contains("Arabic: مرحبا"));
+        assert!(text.contains("{literal}"));
+        assert!(text.contains("HiddenGenerator") == false);
+        assert!(text.contains("Arial") == false);
+    }
+
+    #[test]
+    fn rejects_empty_rtf_output() {
+        assert!(extract_rtf_text(r#"{\\rtf1{\\fonttbl{\\f0 Arial;}}}"#).is_none());
     }
 
     #[test]
