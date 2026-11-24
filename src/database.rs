@@ -146,7 +146,7 @@ impl Database {
                 name TEXT NOT NULL,
                 extension TEXT,
                 size_bytes INTEGER NOT NULL,
-                modified_timestamp_ns INTEGER,
+                modified_unix INTEGER,
                 status TEXT NOT NULL,
                 content TEXT
             );
@@ -243,7 +243,7 @@ impl Database {
     ) -> Result<()> {
         let path = file.path.to_string_lossy().to_string();
         let size = file.size_bytes.min(i64::MAX as u64) as i64;
-        let modified = file.modified_unix.map(|value| value.min(i64::MAX as u64) as i64);
+        let modified = file.modified_timestamp_ns.map(|value| value.min(i64::MAX as u64) as i64);
         let status = match &file.status {
             IndexingStatus::Pending => "pending",
             IndexingStatus::Indexing => "indexing",
@@ -724,7 +724,7 @@ mod database_tests {
             name: name.to_string(),
             extension: name.rsplit('.').next().map(str::to_lowercase),
             size_bytes: size,
-            modified_unix: Some(1_700_000_000),
+            modified_timestamp_ns: Some(1_700_000_000),
             status: IndexingStatus::Pending,
         }
     }
@@ -937,7 +937,7 @@ mod database_tests {
         assert!(!db.is_file_unchanged(&changed).unwrap());
 
         let mut changed_time = file.clone();
-        changed_time.modified_unix = Some(1_700_000_001);
+        changed_time.modified_timestamp_ns = Some(1_700_000_001);
         assert!(!db.is_file_unchanged(&changed_time).unwrap());
     }
 
