@@ -145,6 +145,41 @@ mod tests {
     }
 
     #[test]
+    fn reads_docx_and_odt_xml_from_archives() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "deep-search-office-{}-{unique}",
+            std::process::id()
+        ));
+
+        for (extension, entry_name) in [
+            ("docx", "word/document.xml"),
+            ("odt", "content.xml"),
+        ] {
+            let path = base.with_extension(extension);
+            let file = File::create(&path).unwrap();
+            let mut archive = zip::ZipWriter::new(file);
+            archive
+                .start_file(entry_name, SimpleFileOptions::default())
+                .unwrap();
+            archive
+                .write_all(b"<document><p>Indexed office document</p></document>")
+                .unwrap();
+            archive.finish().unwrap();
+
+            let text = extract_office_text(&path, entry_name).unwrap();
+            assert!(text.contains("Indexed office document"));
+            fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
     fn rejects_invalid_xml() {
         assert!(extract_xml_text("<document>").is_none());
     }
