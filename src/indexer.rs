@@ -155,4 +155,48 @@ mod tests {
 
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn sorts_results_across_multiple_input_paths() {
+        let root = create_temp_dir();
+        let first = root.join("zeta.txt");
+        let second = root.join("alpha.txt");
+        fs::write(&first, b"z").unwrap();
+        fs::write(&second, b"a").unwrap();
+
+        // Deliberately provide paths in reverse lexical order.
+        let report = scan_paths(&[first.as_path(), second.as_path()]);
+
+        assert_eq!(report.errors, 0);
+        assert_eq!(report.files.len(), 2);
+        assert_eq!(report.files[0].name, "alpha.txt");
+        assert_eq!(report.files[1].name, "zeta.txt");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn does_not_follow_symbolic_links() {
+        use std::os::unix::fs::symlink;
+
+        let root = create_temp_dir();
+        let target_dir = root.join("target");
+        let scan_dir = root.join("scan");
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::create_dir_all(&scan_dir).unwrap();
+
+        fs::write(target_dir.join("target.txt"), b"target").unwrap();
+        fs::write(root.join("target-file.txt"), b"file").unwrap();
+        symlink(&target_dir, scan_dir.join("linked-dir")).unwrap();
+        symlink(root.join("target-file.txt"), scan_dir.join("linked-file.txt")).unwrap();
+
+        let report = scan_paths(&[scan_dir.as_path()]);
+
+        assert_eq!(report.errors, 0);
+        assert_eq!(report.directories_scanned, 1);
+        assert!(report.files.is_empty());
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }
