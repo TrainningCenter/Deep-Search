@@ -1,3 +1,5 @@
+pub mod database;
+pub mod engine;
 pub mod indexer;
 
 pub const APP_NAME: &str = "Deep-Search";
