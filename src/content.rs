@@ -64,7 +64,7 @@ fn read_archive_xml(path: &Path, entry_name: &str) -> Option<String> {
         }
     }
 
-    let mut entry = archive.by_name(entry_name).ok()?;
+    let entry = archive.by_name(entry_name).ok()?;
     if entry.size() > MAX_XML_SIZE {
         return None;
     }
