@@ -1,0 +1,15 @@
+
+[package]
+name = "deep-search"
+version = "0.1.0"
+edition = "2024"
+description = "High-performance cross-platform file indexing and search engine"
+license = "MIT"
+
+[lib]
+name = "deep_search"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
