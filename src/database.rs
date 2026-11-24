@@ -87,7 +87,8 @@ impl Database {
                 extension TEXT,
                 size_bytes INTEGER NOT NULL,
                 modified_unix INTEGER,
-                status TEXT NOT NULL
+                status TEXT NOT NULL,
+                content TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_files_name
@@ -101,10 +102,27 @@ impl Database {
             ",
         )?;
 
+        let has_content_column: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('files') WHERE name = 'content')",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_content_column {
+            self.connection.execute("ALTER TABLE files ADD COLUMN content TEXT", [])?;
+        }
+
         Ok(())
     }
 
     pub fn upsert_file(&self, file: &FileRecord) -> Result<()> {
+        self.upsert_file_with_content(file, None)
+    }
+
+    pub fn upsert_file_with_content(
+        &self,
+        file: &FileRecord,
+        content: Option<&str>,
+    ) -> Result<()> {
         let path = file.path.to_string_lossy().to_string();
         let size = file.size_bytes.min(i64::MAX as u64) as i64;
 
@@ -123,14 +141,15 @@ impl Database {
         self.connection.execute(
             "
             INSERT INTO files
-                (path, name, extension, size_bytes, modified_unix, status)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                (path, name, extension, size_bytes, modified_unix, status, content)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             ON CONFLICT(path) DO UPDATE SET
                 name = excluded.name,
                 extension = excluded.extension,
                 size_bytes = excluded.size_bytes,
                 modified_unix = excluded.modified_unix,
-                status = excluded.status
+                status = excluded.status,
+                content = COALESCE(excluded.content, files.content)
             ",
             params![
                 path,
@@ -138,7 +157,8 @@ impl Database {
                 file.extension,
                 size,
                 modified,
-                status
+                status,
+                content
             ],
         )?;
 
@@ -163,6 +183,34 @@ impl Database {
         );
         let mut statement = self.connection.prepare(&sql)?;
         let rows = statement.query_map(params_from_iter(values.iter()), |row| {
+            let path: String = row.get(0)?;
+            let size: i64 = row.get(3)?;
+            Ok(SearchResult {
+                path: path.into(),
+                name: row.get(1)?,
+                extension: row.get(2)?,
+                size_bytes: size.max(0) as u64,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn search_content(&self, term: &str) -> Result<Vec<SearchResult>> {
+        let term = term.trim();
+        if term.is_empty() {
+            return Ok(Vec::new());
+        }
+        let escaped = term
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let pattern = format!("%{escaped}%");
+        let mut statement = self.connection.prepare(
+            "SELECT path, name, extension, size_bytes FROM files
+             WHERE content LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+             ORDER BY name COLLATE NOCASE"
+        )?;
+        let rows = statement.query_map([pattern], |row| {
             let path: String = row.get(0)?;
             let size: i64 = row.get(3)?;
             Ok(SearchResult {
@@ -348,6 +396,29 @@ mod database_tests {
         let db = Database::open(":memory:").unwrap();
         db.upsert_file(&sample_file("report.pdf", 1_000)).unwrap();
         assert!(db.search(&SearchExpression::Or(vec![])).unwrap().is_empty());
+    }
+
+    #[test]
+    fn searches_inside_indexed_file_content() {
+        let db = Database::open(":memory:").unwrap();
+        let file = sample_file("notes.txt", 42);
+        db.upsert_file_with_content(&file, Some("The quick brown fox jumps over the lazy dog")).unwrap();
+        db.upsert_file(&sample_file("other.txt", 12)).unwrap();
+
+        let results = db.search_content("BROWN FOX").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "notes.txt");
+    }
+
+    #[test]
+    fn content_search_treats_wildcards_as_literal_text() {
+        let db = Database::open(":memory:").unwrap();
+        db.upsert_file_with_content(&sample_file("symbols.txt", 8), Some("100%_ready")).unwrap();
+        db.upsert_file_with_content(&sample_file("other.txt", 8), Some("100XXready")).unwrap();
+
+        let results = db.search_content("100%_").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "symbols.txt");
     }
 
     #[test]
