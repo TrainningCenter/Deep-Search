@@ -1,106 +1,36 @@
-use crate::{FileRecord, IndexingStatus};
-use rusqlite::{params, Connection, Result};
-use std::path::Path;
-
-pub struct Database {
-    connection: Connection,
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    pub path: std::path::PathBuf,
+    pub name: String,
+    pub extension: Option<String>,
+    pub size_bytes: u64,
 }
 
 impl Database {
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let connection = Connection::open(path)?;
+    pub fn search_by_name(&self, term: &str) -> Result<Vec<SearchResult>> {
+        let pattern = format!("%{}%", term);
 
-        let database = Self { connection };
-        database.initialize()?;
-
-        Ok(database)
-    }
-
-    pub fn initialize(&self) -> Result<()> {
-        self.connection.execute_batch(
+        let mut statement = self.connection.prepare(
             "
-            PRAGMA journal_mode = WAL;
-            PRAGMA foreign_keys = ON;
-
-            CREATE TABLE IF NOT EXISTS files (
-                id INTEGER PRIMARY KEY,
-                path TEXT NOT NULL UNIQUE,
-                name TEXT NOT NULL,
-                extension TEXT,
-                size_bytes INTEGER NOT NULL,
-                modified_unix INTEGER,
-                status TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_files_name
-            ON files(name);
-
-            CREATE INDEX IF NOT EXISTS idx_files_extension
-            ON files(extension);
-
-            CREATE INDEX IF NOT EXISTS idx_files_size
-            ON files(size_bytes);
+            SELECT path, name, extension, size_bytes
+            FROM files
+            WHERE name LIKE ?1 COLLATE NOCASE
+            ORDER BY name COLLATE NOCASE
             "
         )?;
 
-        Ok(())
-    }
+        let rows = statement.query_map([pattern], |row| {
+            let path: String = row.get(0)?;
+            let size: i64 = row.get(3)?;
 
-    pub fn upsert_file(&self, file: &FileRecord) -> Result<()> {
-        let path = file.path.to_string_lossy().to_string();
+            Ok(SearchResult {
+                path: path.into(),
+                name: row.get(1)?,
+                extension: row.get(2)?,
+                size_bytes: size.max(0) as u64,
+            })
+        })?;
 
-        let size_bytes = file.size_bytes.min(i64::MAX as u64) as i64;
-
-        let modified_unix = file
-            .modified_unix
-            .map(|value| value.min(i64::MAX as u64) as i64);
-
-        let status = match file.status {
-            IndexingStatus::Pending => "pending",
-            IndexingStatus::Indexing => "indexing",
-            IndexingStatus::Indexed => "indexed",
-            IndexingStatus::Skipped => "skipped",
-            IndexingStatus::Failed => "failed",
-        };
-
-        self.connection.execute(
-            "
-            INSERT INTO files (
-                path,
-                name,
-                extension,
-                size_bytes,
-                modified_unix,
-                status
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(path) DO UPDATE SET
-                name = excluded.name,
-                extension = excluded.extension,
-                size_bytes = excluded.size_bytes,
-                modified_unix = excluded.modified_unix,
-                status = excluded.status
-            ",
-            params![
-                path,
-                file.name,
-                file.extension,
-                size_bytes,
-                modified_unix,
-                status
-            ],
-        )?;
-
-        Ok(())
-    }
-
-    pub fn file_count(&self) -> Result<u64> {
-        let count: i64 = self.connection.query_row(
-            "SELECT COUNT(*) FROM files",
-            [],
-            |row| row.get(0),
-        )?;
-
-        Ok(count as u64)
+        rows.collect()
     }
 }
