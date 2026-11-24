@@ -105,6 +105,15 @@ fn parse_condition(token: &str) -> Result<SearchExpression, String> {
         if value.is_empty() { return Err("ext: requires a value".into()); }
         return Ok(SearchExpression::ExtensionEquals(value.into()));
     }
+    if lower.starts_with("type:") {
+        let value = &token[5..];
+        if value.is_empty() { return Err("type: requires a value".into()); }
+        let normalized = value.to_ascii_lowercase();
+        if !["video", "audio", "image", "document", "archive"].contains(&normalized.as_str()) {
+            return Err(format!("Unknown file type '{value}'. Use video, audio, image, document, or archive"));
+        }
+        return Ok(SearchExpression::FileType(normalized));
+    }
     if lower.starts_with("size>=") { return Ok(SearchExpression::SizeAtLeast(parse_size(&token[6..])?)); }
     if lower.starts_with("size<=") { return Ok(SearchExpression::SizeAtMost(parse_size(&token[6..])?)); }
     Err(format!("Unknown condition '{token}'. Use name:, ext:, size>= or size<="))
@@ -164,6 +173,19 @@ mod tests {
                 SearchExpression::ExtensionEquals("pdf".into()),
             ])
         );
+    }
+
+    #[test]
+    fn parses_file_type_search_condition() {
+        assert_eq!(
+            parse_query("type:video AND ext:mkv").unwrap(),
+            SearchExpression::And(vec![
+                SearchExpression::FileType("video".into()),
+                SearchExpression::ExtensionEquals("mkv".into()),
+            ])
+        );
+        assert!(parse_query("type:camera").is_err());
+        assert!(parse_query("type:").is_err());
     }
 
     #[test]
