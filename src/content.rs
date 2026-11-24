@@ -259,6 +259,60 @@ mod tests {
     }
 
     #[test]
+    fn extracts_text_from_powerpoint_slides_and_excel_workbooks() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "deep-search-office-collections-{}-{unique}",
+            std::process::id()
+        ));
+
+        let cases: [(&str, &[(&str, &str)], &[&str]); 2] = [
+            (
+                "pptx",
+                &[
+                    ("ppt/slides/slide1.xml", "<slide><p>First presentation slide</p></slide>"),
+                    ("ppt/slides/slide2.xml", "<slide><p>Second presentation slide</p></slide>"),
+                ],
+                &["First presentation slide", "Second presentation slide"],
+            ),
+            (
+                "xlsx",
+                &[
+                    ("xl/sharedStrings.xml", "<sst><si><t>Quarterly revenue</t></si></sst>"),
+                    ("xl/worksheets/sheet1.xml", "<worksheet><sheetData><row><c t=\"inlineStr\"><is><t>North region</t></is></c></row></sheetData></worksheet>"),
+                ],
+                &["Quarterly revenue", "North region"],
+            ),
+        ];
+
+        for (extension, entries, expected_text) in cases {
+            let path = base.with_extension(extension);
+            let file = File::create(&path).unwrap();
+            let mut archive = zip::ZipWriter::new(file);
+            for (name, xml) in entries {
+                archive
+                    .start_file(*name, SimpleFileOptions::default())
+                    .unwrap();
+                archive.write_all(xml.as_bytes()).unwrap();
+            }
+            archive.finish().unwrap();
+
+            let size = fs::metadata(&path).unwrap().len();
+            let text = extract_text(&path, size).unwrap();
+            for expected in expected_text {
+                assert!(text.contains(expected), "missing {expected} in {extension}");
+            }
+            fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
     fn rejects_invalid_xml() {
         assert!(extract_xml_text("<document>").is_none());
     }
