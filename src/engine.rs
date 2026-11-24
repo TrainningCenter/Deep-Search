@@ -184,6 +184,32 @@ mod content_indexing_tests {
     }
 
     #[test]
+    fn preserves_existing_records_when_a_root_becomes_unavailable() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "deep-search-unavailable-root-{}-{unique}",
+            std::process::id()
+        ));
+        let scan_root = base.join("data");
+        fs::create_dir_all(&scan_root).unwrap();
+        fs::write(scan_root.join("kept.txt"), b"still indexed").unwrap();
+
+        let engine = SearchEngine::open(base.join("index.sqlite")).unwrap();
+        let first = engine.index_paths(&[scan_root.as_path()]);
+        assert_eq!(first.errors, 0);
+        assert_eq!(engine.indexed_file_count().unwrap(), 1);
+
+        fs::remove_dir_all(&scan_root).unwrap();
+        let second = engine.index_paths(&[scan_root.as_path()]);
+        assert!(second.errors > 0);
+        assert_eq!(second.files_removed, 0);
+        assert_eq!(engine.indexed_file_count().unwrap(), 1);
+
+        drop(engine);
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
     fn skips_unsupported_binary_and_oversized_files() {
         let binary = temporary_file("txt", b"hello\0world");
         assert!(extract_text(&binary, 11).is_none());
