@@ -464,36 +464,15 @@ impl Database {
         if term.is_empty() {
             return Ok(Vec::new());
         }
-        let mut statement;
-        let rows = if term.chars().count() >= 3 {
+
+        if term.chars().count() >= 3 {
             let phrase = format!("\"{}\"", term.replace('"', "\"\""));
-            statement = self.connection.prepare(
+            let mut statement = self.connection.prepare(
                 "SELECT path, name, extension, size_bytes FROM files
                  WHERE id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?1)
                  ORDER BY name COLLATE NOCASE"
             )?;
-            statement.query_map([phrase], |row| {
-            let path: String = row.get(0)?;
-            let size: i64 = row.get(3)?;
-            Ok(SearchResult {
-                path: path.into(),
-                name: row.get(1)?,
-                extension: row.get(2)?,
-                size_bytes: size.max(0) as u64,
-            })
-            })?
-        } else {
-            let escaped = term
-                .replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_");
-            let pattern = format!("%{escaped}%");
-            statement = self.connection.prepare(
-                "SELECT path, name, extension, size_bytes FROM files
-                 WHERE content LIKE ?1 ESCAPE '\\' COLLATE NOCASE
-                 ORDER BY name COLLATE NOCASE"
-            )?;
-            statement.query_map([pattern], |row| {
+            let rows = statement.query_map([phrase], |row| {
                 let path: String = row.get(0)?;
                 let size: i64 = row.get(3)?;
                 Ok(SearchResult {
@@ -502,9 +481,31 @@ impl Database {
                     extension: row.get(2)?,
                     size_bytes: size.max(0) as u64,
                 })
-            })?
-        };
-        rows.collect()
+            })?;
+            rows.collect()
+        } else {
+            let escaped = term
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            let pattern = format!("%{escaped}%");
+            let mut statement = self.connection.prepare(
+                "SELECT path, name, extension, size_bytes FROM files
+                 WHERE content LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                 ORDER BY name COLLATE NOCASE"
+            )?;
+            let rows = statement.query_map([pattern], |row| {
+                let path: String = row.get(0)?;
+                let size: i64 = row.get(3)?;
+                Ok(SearchResult {
+                    path: path.into(),
+                    name: row.get(1)?,
+                    extension: row.get(2)?,
+                    size_bytes: size.max(0) as u64,
+                })
+            })?;
+            rows.collect()
+        }
     }
 
     pub fn search_by_name(&self, term: &str) -> Result<Vec<SearchResult>> {
