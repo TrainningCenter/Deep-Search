@@ -564,17 +564,24 @@ impl Database {
             .replace('%', "\\%")
             .replace('_', "\\_");
         let pattern = format!("%{}%", escaped);
+        let prefix = format!("{}%", escaped);
 
         let mut statement = self.connection.prepare(
             "
             SELECT path, name, extension, size_bytes
             FROM files
             WHERE name LIKE ?1 ESCAPE '\\' COLLATE NOCASE
-            ORDER BY name COLLATE NOCASE
+            ORDER BY
+                CASE
+                    WHEN name = ?2 COLLATE NOCASE THEN 0
+                    WHEN name LIKE ?3 ESCAPE '\\' COLLATE NOCASE THEN 1
+                    ELSE 2
+                END,
+                name COLLATE NOCASE
             ",
         )?;
 
-        let rows = statement.query_map([pattern], |row| {
+        let rows = statement.query_map(params![pattern, term, prefix], |row| {
             let path: String = row.get(0)?;
             let size: i64 = row.get(3)?;
 
