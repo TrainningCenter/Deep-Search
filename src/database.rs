@@ -200,6 +200,70 @@ impl Database {
         Ok(unchanged.unwrap_or(false))
     }
 
+    /// Remove stale records only inside roots whose scans completed successfully.
+    pub fn prune_missing_files(
+        &self,
+        roots: &[(std::path::PathBuf, bool)],
+        present_paths: &[std::path::PathBuf],
+    ) -> Result<u64> {
+        if roots.is_empty() {
+            return Ok(0);
+        }
+
+        let transaction = self.connection.unchecked_transaction()?;
+        transaction.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS deep_search_seen_paths (
+                path TEXT PRIMARY KEY
+             );
+             DELETE FROM deep_search_seen_paths;"
+        )?;
+
+        {
+            let mut insert = transaction.prepare(
+                "INSERT OR IGNORE INTO deep_search_seen_paths(path) VALUES (?1)"
+            )?;
+            for path in present_paths {
+                insert.execute([path.to_string_lossy().as_ref()])?;
+            }
+        }
+
+        let mut deleted = 0_u64;
+        for (root, is_directory) in roots {
+            let root_text = root.to_string_lossy().into_owned();
+            let prefix = if *is_directory {
+                format!("{}{}", root_text.trim_end_matches(std::path::MAIN_SEPARATOR), std::path::MAIN_SEPARATOR)
+            } else {
+                root_text.clone()
+            };
+
+            let affected = if *is_directory {
+                transaction.execute(
+                    "DELETE FROM files
+                     WHERE substr(path, 1, length(?1)) = ?1
+                       AND NOT EXISTS (
+                           SELECT 1 FROM deep_search_seen_paths seen
+                           WHERE seen.path = files.path
+                       )",
+                    [&prefix],
+                )?
+            } else {
+                transaction.execute(
+                    "DELETE FROM files
+                     WHERE path = ?1
+                       AND NOT EXISTS (
+                           SELECT 1 FROM deep_search_seen_paths seen
+                           WHERE seen.path = files.path
+                       )",
+                    [&root_text],
+                )?
+            };
+            deleted += affected as u64;
+        }
+
+        transaction.commit()?;
+        Ok(deleted)
+    }
+
     pub fn file_count(&self) -> Result<u64> {
         let count: i64 = self.connection.query_row(
             "SELECT COUNT(*) FROM files",
@@ -484,6 +548,38 @@ mod database_tests {
         db.replace_file_with_content(&changed, None).unwrap();
 
         assert!(db.search_content("old searchable").unwrap().is_empty());
+    }
+
+    #[test]
+    fn prunes_missing_files_only_inside_completed_roots() {
+        let db = Database::open(":memory:").unwrap();
+        let root = PathBuf::from("/scan-root");
+        let keep = root.join("keep.txt");
+        let remove = root.join("remove.txt");
+        let outside = PathBuf::from("/other/outside.txt");
+
+        db.upsert_file(&sample_file("keep.txt", 10)).unwrap();
+        let mut keep_record = sample_file("keep.txt", 10);
+        keep_record.path = keep.clone();
+        db.upsert_file(&keep_record).unwrap();
+
+        let mut remove_record = sample_file("remove.txt", 20);
+        remove_record.path = remove.clone();
+        db.upsert_file(&remove_record).unwrap();
+
+        let mut outside_record = sample_file("outside.txt", 30);
+        outside_record.path = outside.clone();
+        db.upsert_file(&outside_record).unwrap();
+
+        let deleted = db.prune_missing_files(
+            &[(root.clone(), true)],
+            std::slice::from_ref(&keep),
+        ).unwrap();
+
+        assert_eq!(deleted, 1);
+        assert!(db.search_by_name("keep").unwrap().iter().any(|f| f.path == keep));
+        assert!(db.search_by_name("remove").unwrap().is_empty());
+        assert!(db.search_by_name("outside").unwrap().iter().any(|f| f.path == outside));
     }
 
     #[test]
