@@ -14,6 +14,7 @@ pub struct SearchResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchExpression {
     NameContains(String),
+    ContentContains(String),
     ExtensionEquals(String),
     SizeAtLeast(u64),
     SizeAtMost(u64),
@@ -31,6 +32,14 @@ fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) ->
                 .replace('_', "\\_");
             values.push(Value::Text(format!("%{escaped}%")));
             format!("name LIKE ?{} ESCAPE '\\' COLLATE NOCASE", values.len())
+        }
+        SearchExpression::ContentContains(term) => {
+            let escaped = term.trim()
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            values.push(Value::Text(format!("%{escaped}%")));
+            format!("content LIKE ?{} ESCAPE '\\' COLLATE NOCASE", values.len())
         }
         SearchExpression::ExtensionEquals(extension) => {
             values.push(Value::Text(extension.trim().trim_start_matches('.').to_lowercase()));
