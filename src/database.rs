@@ -34,12 +34,19 @@ fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) ->
             format!("name LIKE ?{} ESCAPE '\\' COLLATE NOCASE", values.len())
         }
         SearchExpression::ContentContains(term) => {
-            let escaped = term.trim()
-                .replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_");
-            values.push(Value::Text(format!("%{escaped}%")));
-            format!("content LIKE ?{} ESCAPE '\\' COLLATE NOCASE", values.len())
+            let term = term.trim();
+            if term.chars().count() >= 3 {
+                let phrase = format!("\"{}\"", term.replace('"', "\"\""));
+                values.push(Value::Text(phrase));
+                format!("id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?{})", values.len())
+            } else {
+                let escaped = term
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_");
+                values.push(Value::Text(format!("%{escaped}%")));
+                format!("content LIKE ?{} ESCAPE '\\' COLLATE NOCASE", values.len())
+            }
         }
         SearchExpression::ExtensionEquals(extension) => {
             values.push(Value::Text(extension.trim().trim_start_matches('.').to_lowercase()));
@@ -129,6 +136,34 @@ impl Database {
         )?;
         if !has_content_column {
             self.connection.execute("ALTER TABLE files ADD COLUMN content TEXT", [])?;
+        }
+
+        self.connection.execute_batch(
+            "
+            CREATE VIRTUAL TABLE IF NOT EXISTS files_fts
+            USING fts5(content, content='files', content_rowid='id', tokenize='trigram');
+
+            CREATE TRIGGER IF NOT EXISTS files_fts_insert AFTER INSERT ON files BEGIN
+                INSERT INTO files_fts(rowid, content) VALUES (new.id, new.content);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS files_fts_delete AFTER DELETE ON files BEGIN
+                INSERT INTO files_fts(files_fts, rowid, content)
+                VALUES ('delete', old.id, old.content);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS files_fts_update AFTER UPDATE OF content ON files BEGIN
+                INSERT INTO files_fts(files_fts, rowid, content)
+                VALUES ('delete', old.id, old.content);
+                INSERT INTO files_fts(rowid, content) VALUES (new.id, new.content);
+            END;
+            "
+        )?;
+
+        let schema_version: i64 = self.connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if schema_version < 1 {
+            self.connection.execute("INSERT INTO files_fts(files_fts) VALUES ('rebuild')", [])?;
+            self.connection.pragma_update(None, "user_version", 1)?;
         }
 
         Ok(())
@@ -429,17 +464,15 @@ impl Database {
         if term.is_empty() {
             return Ok(Vec::new());
         }
-        let escaped = term
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        let pattern = format!("%{escaped}%");
-        let mut statement = self.connection.prepare(
-            "SELECT path, name, extension, size_bytes FROM files
-             WHERE content LIKE ?1 ESCAPE '\\' COLLATE NOCASE
-             ORDER BY name COLLATE NOCASE"
-        )?;
-        let rows = statement.query_map([pattern], |row| {
+        let mut statement;
+        let rows = if term.chars().count() >= 3 {
+            let phrase = format!("\"{}\"", term.replace('"', "\"\""));
+            statement = self.connection.prepare(
+                "SELECT path, name, extension, size_bytes FROM files
+                 WHERE id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?1)
+                 ORDER BY name COLLATE NOCASE"
+            )?;
+            statement.query_map([phrase], |row| {
             let path: String = row.get(0)?;
             let size: i64 = row.get(3)?;
             Ok(SearchResult {
@@ -448,7 +481,29 @@ impl Database {
                 extension: row.get(2)?,
                 size_bytes: size.max(0) as u64,
             })
-        })?;
+            })?
+        } else {
+            let escaped = term
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            let pattern = format!("%{escaped}%");
+            statement = self.connection.prepare(
+                "SELECT path, name, extension, size_bytes FROM files
+                 WHERE content LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                 ORDER BY name COLLATE NOCASE"
+            )?;
+            statement.query_map([pattern], |row| {
+                let path: String = row.get(0)?;
+                let size: i64 = row.get(3)?;
+                Ok(SearchResult {
+                    path: path.into(),
+                    name: row.get(1)?,
+                    extension: row.get(2)?,
+                    size_bytes: size.max(0) as u64,
+                })
+            })?
+        };
         rows.collect()
     }
 
