@@ -303,7 +303,7 @@ impl Database {
             for (file, content) in files {
                 let path = file.path.to_string_lossy().to_string();
                 let size = file.size_bytes.min(i64::MAX as u64) as i64;
-                let modified = file.modified_unix.map(|value| value.min(i64::MAX as u64) as i64);
+                let modified = file.modified_timestamp_ns.map(|value| value.min(i64::MAX as u64) as i64);
                 let status = match &file.status {
                     IndexingStatus::Pending => "pending",
                     IndexingStatus::Indexing => "indexing",
@@ -324,7 +324,7 @@ impl Database {
     pub fn is_file_unchanged(&self, file: &FileRecord) -> Result<bool> {
         let path = file.path.to_string_lossy().to_string();
         let size = file.size_bytes.min(i64::MAX as u64) as i64;
-        let modified = file.modified_unix.map(|value| value.min(i64::MAX as u64) as i64);
+        let modified = file.modified_timestamp_ns.map(|value| value.min(i64::MAX as u64) as i64);
         let unchanged: Option<bool> = self.connection.query_row(
             "SELECT size_bytes = ?2 AND modified_unix IS ?3
              FROM files WHERE path = ?1",
