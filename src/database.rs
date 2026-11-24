@@ -17,6 +17,7 @@ pub enum SearchExpression {
     PathContains(String),
     ContentContains(String),
     ExtensionEquals(String),
+    FileType(String),
     SizeAtLeast(u64),
     SizeAtMost(u64),
     And(Vec<SearchExpression>),
@@ -104,6 +105,21 @@ fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) ->
         SearchExpression::ExtensionEquals(extension) => {
             values.push(Value::Text(extension.trim().trim_start_matches('.').to_lowercase()));
             format!("extension = ?{} COLLATE NOCASE", values.len())
+        }
+        SearchExpression::FileType(file_type) => {
+            let extensions: &[&str] = match file_type.trim().to_ascii_lowercase().as_str() {
+                "video" => &["3gp", "avi", "flv", "m2ts", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "mts", "ogv", "ts", "vob", "webm", "wmv"],
+                "audio" => &["aac", "aif", "aiff", "alac", "flac", "m4a", "mp3", "ogg", "opus", "wav", "wma"],
+                "image" => &["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp"],
+                "document" => &["csv", "doc", "docx", "md", "odt", "pdf", "ppt", "pptx", "rtf", "txt", "xls", "xlsx"],
+                "archive" => &["7z", "bz2", "gz", "rar", "tar", "xz", "zip"],
+                _ => return "0 = 1".to_string(),
+            };
+            let placeholders: Vec<String> = extensions.iter().map(|extension| {
+                values.push(Value::Text((*extension).to_string()));
+                format!("?{}", values.len())
+            }).collect();
+            format!("extension IN ({}) COLLATE NOCASE", placeholders.join(", "))
         }
         SearchExpression::SizeAtLeast(size) => {
             values.push(Value::Integer((*size).min(i64::MAX as u64) as i64));
@@ -865,6 +881,24 @@ mod database_tests {
         let literal = db.search(&SearchExpression::PathContains("100%_complete".into())).unwrap();
         assert_eq!(literal.len(), 1);
         assert_eq!(literal[0].name, "notes.pdf");
+    }
+
+    #[test]
+    fn filters_files_by_common_file_type_categories() {
+        let db = Database::open(":memory:").unwrap();
+        for name in ["movie.mkv", "clip.mp4", "song.flac", "photo.webp", "report.pdf", "backup.zip", "unknown.raw"] {
+            db.upsert_file(&sample_file(name, 10)).unwrap();
+        }
+
+        let videos = db.search(&SearchExpression::FileType("video".into())).unwrap();
+        assert_eq!(videos.len(), 2);
+        assert!(videos.iter().all(|file| ["mkv", "mp4"].contains(&file.extension.as_deref().unwrap())));
+
+        assert_eq!(db.search(&SearchExpression::FileType("audio".into())).unwrap().len(), 1);
+        assert_eq!(db.search(&SearchExpression::FileType("image".into())).unwrap().len(), 1);
+        assert_eq!(db.search(&SearchExpression::FileType("document".into())).unwrap().len(), 1);
+        assert_eq!(db.search(&SearchExpression::FileType("archive".into())).unwrap().len(), 1);
+        assert!(db.search(&SearchExpression::FileType("unknown".into())).unwrap().is_empty());
     }
 
     #[test]
