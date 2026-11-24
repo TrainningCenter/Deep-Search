@@ -484,7 +484,24 @@ impl Database {
     }
 
     pub fn search(&self, expression: &SearchExpression) -> Result<Vec<SearchResult>> {
-        self.search_page(expression, u32::MAX, 0)
+        let mut values = Vec::new();
+        let condition = compile_expression(expression, &mut values);
+        let relevance = name_relevance_order(expression, &mut values);
+        let sql = format!(
+            "SELECT path, name, extension, size_bytes FROM files WHERE {condition} ORDER BY {relevance}, name COLLATE NOCASE"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(values.iter()), |row| {
+            let path: String = row.get(0)?;
+            let size: i64 = row.get(3)?;
+            Ok(SearchResult {
+                path: path.into(),
+                name: row.get(1)?,
+                extension: row.get(2)?,
+                size_bytes: size.max(0) as u64,
+            })
+        })?;
+        rows.collect()
     }
 
     /// Return a bounded page of matching files while preserving relevance order.
