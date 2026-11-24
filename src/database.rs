@@ -846,6 +846,28 @@ mod database_tests {
     }
 
     #[test]
+    fn searches_by_path_and_treats_wildcards_as_literal_text() {
+        let db = Database::open(":memory:").unwrap();
+        let mut first = sample_file("report.pdf", 10);
+        first.path = PathBuf::from("/archive/2025/report.pdf");
+        let mut second = sample_file("report.pdf", 10);
+        second.path = PathBuf::from("/current/report.pdf");
+        let mut third = sample_file("notes.pdf", 10);
+        third.path = PathBuf::from("/archive/2025/100%_complete/notes.pdf");
+        db.upsert_file(&first).unwrap();
+        db.upsert_file(&second).unwrap();
+        db.upsert_file(&third).unwrap();
+
+        let results = db.search(&SearchExpression::PathContains("/archive/2025".into())).unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|item| item.path.to_string_lossy().contains("/archive/2025")));
+
+        let literal = db.search(&SearchExpression::PathContains("100%_complete".into())).unwrap();
+        assert_eq!(literal.len(), 1);
+        assert_eq!(literal[0].name, "notes.pdf");
+    }
+
+    #[test]
     fn combines_search_conditions_with_and() {
         let db = Database::open(":memory:").unwrap();
         db.upsert_file(&sample_file("movie.mkv", 5_000)).unwrap();
