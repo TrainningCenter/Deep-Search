@@ -558,7 +558,6 @@ mod database_tests {
         let remove = root.join("remove.txt");
         let outside = PathBuf::from("/other/outside.txt");
 
-        db.upsert_file(&sample_file("keep.txt", 10)).unwrap();
         let mut keep_record = sample_file("keep.txt", 10);
         keep_record.path = keep.clone();
         db.upsert_file(&keep_record).unwrap();
