@@ -146,7 +146,7 @@ impl Database {
                 name TEXT NOT NULL,
                 extension TEXT,
                 size_bytes INTEGER NOT NULL,
-                modified_unix INTEGER,
+                modified_timestamp_ns INTEGER,
                 status TEXT NOT NULL,
                 content TEXT
             );
