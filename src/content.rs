@@ -531,7 +531,7 @@ Escaped: \{literal\} and \~ space.}"#;
 
     #[test]
     fn rejects_empty_rtf_output() {
-        assert!(extract_rtf_text(r#"{\\rtf1{\\fonttbl{\\f0 Arial;}}}"#).is_none());
+        assert!(extract_rtf_text(r#"{\rtf1{\fonttbl{\f0 Arial;}}}"#).is_none());
     }
 
     #[test]
