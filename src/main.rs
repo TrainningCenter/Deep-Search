@@ -52,6 +52,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("Files discovered: {}", report.files_discovered);
             println!("Files saved: {}", report.files_saved);
             println!("Files unchanged: {}", report.files_unchanged);
+            println!("Files removed: {}", report.files_removed);
             println!("Directories scanned: {}", report.directories_scanned);
             println!("Errors: {}", report.errors);
         }
