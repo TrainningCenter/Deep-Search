@@ -652,7 +652,7 @@ impl DeepSearchApp {
     }
 
     fn render_column_controls(&mut self, ui: &mut egui::Ui) {
-        ui.heading(if self.arabic { "إعدادات الأعمدة" } else { "Columns & layout" });
+        ui.heading(display_text(if self.arabic { "إعدادات الأعمدة" } else { "Columns & layout" }));
         let mut changed = false;
         let mut move_request: Option<(usize, isize)> = None;
         let mut remove_request: Option<usize> = None;
@@ -670,7 +670,7 @@ impl DeepSearchApp {
                 if handle.drag_started() { drag_started = Some(index); }
                 let column = &mut columns[index];
                 let label = column_label(&column.key, arabic);
-                changed |= ui.checkbox(&mut column.visible, label).changed();
+                changed |= ui.checkbox(&mut column.visible, display_text(label)).changed();
                 // Column widths are resized directly from the table header.
                 if ui.small_button("↑").clicked() && index > 0 {
                     move_request = Some((index, -1));
@@ -706,7 +706,7 @@ impl DeepSearchApp {
             columns.remove(index);
             changed = true;
         }
-        if ui.button(if arabic { "إضافة الأعمدة المتاحة" } else { "Add available columns" }).clicked() {
+        if ui.button(display_text(if arabic { "إضافة الأعمدة المتاحة" } else { "Add available columns" })).clicked() {
             for candidate in default_columns() {
                 if !columns.iter().any(|existing| existing.key == candidate.key) {
                     columns.push(candidate);
@@ -717,21 +717,21 @@ impl DeepSearchApp {
         self.dragged_column = next_dragged_column;
         let row_height = &mut self.active_profile_mut().row_height;
         ui.with_layout(horizontal_layout(arabic), |ui| {
-            ui.label(if arabic { "ارتفاع الصف" } else { "Row height" });
+            ui.label(display_text(if arabic { "ارتفاع الصف" } else { "Row height" }));
             changed |= ui.add(egui::Slider::new(row_height, 18.0..=60.0).suffix(" px")).changed();
         });
         let visible_count = self.active_profile().columns.iter().filter(|column| column.visible).count();
         let max_frozen = visible_count.min(4);
         let frozen_columns = &mut self.active_profile_mut().frozen_columns;
         ui.with_layout(horizontal_layout(arabic), |ui| {
-            ui.label(if arabic { "تثبيت الأعمدة الأولى" } else { "Freeze leading columns" });
+            ui.label(display_text(if arabic { "تثبيت الأعمدة الأولى" } else { "Freeze leading columns" }));
             changed |= ui.add(egui::Slider::new(frozen_columns, 0..=max_frozen)).changed();
         });
         if *frozen_columns > max_frozen {
             *frozen_columns = max_frozen;
             changed = true;
         }
-        if ui.button(if self.arabic { "ملاءمة تلقائية للأعمدة" } else { "Auto-fit columns" }).clicked() {
+        if ui.button(display_text(if self.arabic { "ملاءمة تلقائية للأعمدة" } else { "Auto-fit columns" })).clicked() {
             let widths = self.active_profile().columns.iter().map(|column| {
                 let header_width = column_label(&column.key, arabic).chars().count();
                 let content_width = self.results.iter().take(500)
@@ -750,11 +750,11 @@ impl DeepSearchApp {
     }
 
     fn render_results(&mut self, ui: &mut egui::Ui) {
-        ui.label(format!("{} result(s)", self.total));
+        ui.label(display_text(format!("{} result(s)", self.total)));
         let columns = self.active_profile().columns.iter()
             .filter(|column| column.visible).cloned().collect::<Vec<_>>();
         if columns.is_empty() {
-            ui.centered_and_justified(|ui| ui.label("Show at least one column in Columns & layout."));
+            ui.centered_and_justified(|ui| ui.label(display_text("Show at least one column in Columns & layout.")));
             return;
         }
 
@@ -835,7 +835,7 @@ impl TableDelegate for ResultsTableDelegate<'_> {
         };
         ui.with_layout(layout, |ui| {
             if let Some(column) = self.columns.get(cell.col_range.start) {
-                ui.strong(column_label(&column.key, self.arabic));
+                ui.strong(display_text(column_label(&column.key, self.arabic)));
             }
         });
     }
@@ -856,27 +856,27 @@ impl TableDelegate for ResultsTableDelegate<'_> {
             if column.key == "name" {
                 let path = result.get("path").and_then(Value::as_str).unwrap_or("").to_owned();
                 let response = ui.add(
-                    egui::Label::new(value).truncate().sense(egui::Sense::click())
+                    egui::Label::new(display_text(value)).truncate().sense(egui::Sense::click())
                 );
                 if response.double_clicked() && !path.is_empty() {
                     open_path_in_default_app(path.clone());
                 }
                 response.context_menu(|ui| {
-                    if ui.add_enabled(!path.is_empty(), egui::Button::new(
+                    if ui.add_enabled(!path.is_empty(), egui::Button::new(display_text(
                         if self.arabic { "فتح الملف" } else { "Open file" }
-                    )).clicked() {
+                    ))).clicked() {
                         open_path_in_default_app(path.clone());
                         ui.close_menu();
                     }
-                    if ui.add_enabled(!path.is_empty(), egui::Button::new(
+                    if ui.add_enabled(!path.is_empty(), egui::Button::new(display_text(
                         if self.arabic { "نسخ المسار الكامل" } else { "Copy full path" }
-                    )).clicked() {
+                    ))).clicked() {
                         ui.ctx().copy_text(path.clone());
                         ui.close_menu();
                     }
                 });
             } else {
-                ui.add(egui::Label::new(value).truncate());
+                ui.add(egui::Label::new(display_text(value)).truncate());
             }
         });
     }
@@ -918,9 +918,9 @@ impl eframe::App for DeepSearchApp {
         }
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
             ui.with_layout(horizontal_layout(self.arabic), |ui| {
-                ui.heading("Deep-Search");
+                ui.heading(display_text("Deep-Search"));
                 ui.separator();
-                ui.label("Desktop Alpha");
+                ui.label(display_text("Desktop Alpha"));
                 ui.separator();
                 let profiles = self.settings.profiles.keys().cloned().collect::<Vec<_>>();
                 let active = self.settings.active_profile.clone();
@@ -936,11 +936,11 @@ impl eframe::App for DeepSearchApp {
                 if ui.button("Save profile").clicked() { self.persist_settings(); }
                 ui.add(egui::TextEdit::singleline(&mut self.new_profile_name).hint_text("New profile name").desired_width(130.0));
                 if ui.button("Save as").clicked() { self.save_profile_as(); }
-                if ui.button(if self.arabic { "English" } else { "العربية" }).clicked() {
+                if ui.button(display_text(if self.arabic { "English" } else { "العربية" })).clicked() {
                     self.arabic = !self.arabic;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(count) = self.indexed_files { ui.label(format!("{count} indexed files")); }
+                    if let Some(count) = self.indexed_files { ui.label(display_text(format!("{count} indexed files"))); }
                 });
             });
         });
@@ -955,26 +955,26 @@ impl eframe::App for DeepSearchApp {
                 if self.arabic { egui::Layout::top_down(egui::Align::Max) }
                 else { egui::Layout::top_down(egui::Align::Min) },
                 |ui| {
-            ui.heading(if self.arabic { "الخدمة" } else { "Service" });
-            ui.label(if self.arabic { "عنوان الخدمة" } else { "Address" });
+            ui.heading(display_text(if self.arabic { "الخدمة" } else { "Service" }));
+            ui.label(display_text(if self.arabic { "عنوان الخدمة" } else { "Address" }));
             ui.text_edit_singleline(&mut self.service_address);
-            if ui.button(if self.arabic { "اتصال / تحديث الحالة" } else { "Connect / Refresh status" }).clicked() {
+            if ui.button(display_text(if self.arabic { "اتصال / تحديث الحالة" } else { "Connect / Refresh status" })).clicked() {
                 self.check_status();
             }
             ui.separator();
-            ui.heading(if self.arabic { "مجلدات الفهرسة" } else { "Index locations" });
-            ui.label(if self.arabic { "مسار مجلد في كل سطر:" } else { "One folder path per line:" });
-            if ui.button(if self.arabic { "استعراض المجلدات…" } else { "Browse folders…" }).clicked() {
+            ui.heading(display_text(if self.arabic { "مجلدات الفهرسة" } else { "Index locations" }));
+            ui.label(display_text(if self.arabic { "مسار مجلد في كل سطر:" } else { "One folder path per line:" }));
+            if ui.button(display_text(if self.arabic { "استعراض المجلدات…" } else { "Browse folders…" })).clicked() {
                 self.pick_folder();
             }
             ui.add(egui::TextEdit::multiline(&mut self.roots).desired_rows(4).desired_width(f32::INFINITY));
-            if ui.add_enabled(!self.busy, egui::Button::new(if self.arabic { "ابدأ الفهرسة" } else { "Index locations" })).clicked() {
+            if ui.add_enabled(!self.busy, egui::Button::new(display_text(if self.arabic { "ابدأ الفهرسة" } else { "Index locations" }))).clicked() {
                 self.index_roots();
             }
             ui.separator();
-            ui.collapsing(if self.arabic { "إدارة خدمة الخلفية" } else { "Background service" }, |ui| {
+            ui.collapsing(display_text(if self.arabic { "إدارة خدمة الخلفية" } else { "Background service" }), |ui| {
                 if let Some(active) = self.service_active {
-                    ui.label(format!("Runtime: {}", if active { "Running" } else { "Stopped" }));
+                    ui.label(display_text(format!("Runtime: {}", if active { "Running" } else { "Stopped" })));
                 }
                 if let Some(enabled) = self.service_enabled {
                     let mut startup = enabled;
@@ -985,14 +985,14 @@ impl eframe::App for DeepSearchApp {
                         self.control_system_service(if startup { "enable" } else { "disable" });
                     }
                 } else {
-                    ui.label(if self.arabic { "حالة بدء التشغيل غير معروفة" } else { "Boot startup state unavailable" });
+                    ui.label(display_text(if self.arabic { "حالة بدء التشغيل غير معروفة" } else { "Boot startup state unavailable" }));
                 }
                 if self.logout_detection_available == Some(false) {
-                    ui.label(if self.arabic {
+                    ui.label(display_text(if self.arabic {
                         "تعذّر اكتشاف جلسات المستخدم؛ ستظل الخدمة تعمل بعد تسجيل الخروج"
                     } else {
                         "Session detection unavailable; the service will keep running after logout"
-                    });
+                    }));
                 } else if let Some(current) = self.stop_on_logout {
                     let mut stop_on_logout = current;
                     if ui.add_enabled(
@@ -1005,53 +1005,53 @@ impl eframe::App for DeepSearchApp {
                         self.set_stop_on_logout(stop_on_logout);
                     }
                 } else {
-                    ui.label(if self.arabic {
+                    ui.label(display_text(if self.arabic {
                         "اتصل بالخدمة لضبط سلوك تسجيل الخروج"
                     } else {
                         "Connect to the service to configure logout behavior"
-                    });
+                    }));
                 }
                 if let Some(paused) = self.indexing_paused {
                     if ui.add_enabled(
                         !self.service_busy,
-                        egui::Button::new(if paused {
+                        egui::Button::new(display_text(if paused {
                             if self.arabic { "استئناف الفهرسة" } else { "Resume indexing" }
-                        } else if self.arabic { "إيقاف الفهرسة مؤقتًا" } else { "Pause indexing" }),
+                        } else if self.arabic { "إيقاف الفهرسة مؤقتًا" } else { "Pause indexing" })),
                     ).clicked() {
                         self.set_indexing_paused(!paused);
                     }
                 }
                 ui.with_layout(horizontal_layout(self.arabic), |ui| {
-                    if ui.add_enabled(!self.service_busy, egui::Button::new(if self.arabic { "تشغيل" } else { "Start" })).clicked() {
+                    if ui.add_enabled(!self.service_busy, egui::Button::new(display_text(if self.arabic { "تشغيل" } else { "Start" }))).clicked() {
                         self.control_system_service("start");
                     }
-                    if ui.add_enabled(!self.service_busy, egui::Button::new(if self.arabic { "إيقاف" } else { "Stop" })).clicked() {
+                    if ui.add_enabled(!self.service_busy, egui::Button::new(display_text(if self.arabic { "إيقاف" } else { "Stop" }))).clicked() {
                         self.control_system_service("stop");
                     }
-                    if ui.add_enabled(!self.service_busy, egui::Button::new(if self.arabic { "تحديث" } else { "Refresh" })).clicked() {
+                    if ui.add_enabled(!self.service_busy, egui::Button::new(display_text(if self.arabic { "تحديث" } else { "Refresh" }))).clicked() {
                         self.check_system_service();
                     }
                 });
                 if self.service_busy { ui.spinner(); }
-                ui.label(&self.service_detail);
-                ui.small(if self.arabic { "مدير خدمات النظام · قد يُطلب تأكيد الصلاحيات" } else { "Platform service manager · elevated authorization may be requested" });
+                ui.label(display_text(&self.service_detail));
+                ui.small(display_text(if self.arabic { "مدير خدمات النظام · قد يُطلب تأكيد الصلاحيات" } else { "Platform service manager · elevated authorization may be requested" }));
             });
             ui.separator();
-            ui.heading(if self.arabic { "بحث" } else { "Search" });
+            ui.heading(display_text(if self.arabic { "بحث" } else { "Search" }));
             ui.text_edit_singleline(&mut self.search_query);
-            egui::ComboBox::from_label(if self.arabic { "ترتيب حسب" } else { "Sort by" })
+            egui::ComboBox::from_label(display_text(if self.arabic { "ترتيب حسب" } else { "Sort by" }))
                 .selected_text(&self.sort_field).show_ui(ui, |ui| {
                     for field in ["name", "path", "extension", "size", "modified", "relevance"] {
                         ui.selectable_value(&mut self.sort_field, field.to_owned(), field);
                     }
                 });
             ui.checkbox(&mut self.descending, if self.arabic { "ترتيب تنازلي" } else { "Descending" });
-            if ui.add_enabled(!self.busy, egui::Button::new(if self.arabic { "بحث في كل النتائج" } else { "Search all results" })).clicked() {
+            if ui.add_enabled(!self.busy, egui::Button::new(display_text(if self.arabic { "بحث في كل النتائج" } else { "Search all results" }))).clicked() {
                 self.search();
             }
             ui.separator();
             if self.busy { ui.spinner(); }
-            ui.label(&self.message);
+            ui.label(display_text(&self.message));
                 },
             );
         });
@@ -1067,7 +1067,7 @@ impl eframe::App for DeepSearchApp {
                 else { egui::Layout::top_down(egui::Align::Min) },
                 |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        ui.heading(if self.arabic { "إعدادات التطبيق" } else { "Application settings" });
+                        ui.heading(display_text(if self.arabic { "إعدادات التطبيق" } else { "Application settings" }));
                         let tray_before = self.settings.tray_enabled;
                         let tray_changed = ui.checkbox(&mut self.settings.tray_enabled, if self.arabic { "إظهار أيقونة شريط النظام" } else { "Show system tray icon" }).changed();
                         let close_changed = ui.checkbox(&mut self.settings.close_to_tray, if self.arabic { "إخفاء النافذة عند الإغلاق" } else { "Close window to tray" }).changed();
@@ -1093,10 +1093,10 @@ impl eframe::App for DeepSearchApp {
         });
 
         if self.settings_window_open {
-            egui::Window::new(if self.arabic { "الإعدادات" } else { "Settings" })
+            egui::Window::new(display_text(if self.arabic { "الإعدادات" } else { "Settings" }))
                 .open(&mut self.settings_window_open)
                 .show(ctx, |ui| {
-                    ui.label(if self.arabic { "يمكنك ضبط سلوك شريط النظام من لوحة إعدادات التطبيق." } else { "Configure tray visibility and close-to-tray behavior in the application settings panel." });
+                    ui.label(display_text(if self.arabic { "يمكنك ضبط سلوك شريط النظام من لوحة إعدادات التطبيق." } else { "Configure tray visibility and close-to-tray behavior in the application settings panel." }));
                 });
         }
 
@@ -1105,12 +1105,12 @@ impl eframe::App for DeepSearchApp {
                 if self.arabic { egui::Layout::top_down(egui::Align::Max) }
                 else { egui::Layout::top_down(egui::Align::Min) },
                 |ui| {
-            ui.heading(if self.arabic { "نتائج البحث" } else { "Search results" });
-            ui.label(if self.arabic {
+            ui.heading(display_text(if self.arabic { "نتائج البحث" } else { "Search results" }));
+            ui.label(display_text(if self.arabic {
                 "جدول واحد مستمر · يتم جلب جميع النتائج تلقائيًا · يمكن تغيير عرض الأعمدة"
             } else {
                 "One continuous table · all matches are fetched automatically · resize columns by dragging"
-            });
+            }));
             ui.separator();
             egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| self.render_results(ui));
                 },
