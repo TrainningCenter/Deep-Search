@@ -3,6 +3,7 @@ use crate::content::extract_text;
 use crate::database::{Database, SearchExpression, SearchResult, SearchSortDirection, SearchSortField};
 use crate::indexer::scan_paths_batched;
 use rusqlite::Result;
+use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
 
@@ -80,22 +81,28 @@ impl SearchEngine {
                 return false;
             }
 
-            let mut pending_batch = Vec::with_capacity(filtered_batch.len());
+            // SQLite stays on the indexing thread, while independent file reads
+            // and document extraction run concurrently across available CPU cores.
+            let mut changed_files = Vec::with_capacity(filtered_batch.len());
             for file in &filtered_batch {
                 match self.database.is_file_unchanged(file) {
                     Ok(true) => {
                         report.files_unchanged += 1;
                     }
-                    Ok(false) => {
-                        let content = extract_text(&file.path, file.size_bytes);
-                        pending_batch.push((file.clone(), content));
-                    }
+                    Ok(false) => changed_files.push(file.clone()),
                     Err(_) => {
                         report.errors += 1;
                         indexing_failed = true;
                     }
                 }
             }
+
+            let pending_batch: Vec<_> = changed_files.into_par_iter()
+                .map(|file| {
+                    let content = extract_text(&file.path, file.size_bytes);
+                    (file, content)
+                })
+                .collect();
 
             if !pending_batch.is_empty() {
                 let saved = pending_batch.len() as u64;
