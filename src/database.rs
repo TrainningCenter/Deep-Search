@@ -735,16 +735,7 @@ impl Database {
                  ORDER BY name COLLATE NOCASE"
             )?;
             let rows = statement.query_map([phrase], |row| {
-                let path: String = row.get(0)?;
-                let size: i64 = row.get(3)?;
-            let modified: Option<i64> = row.get(4)?;
-                Ok(SearchResult {
-                    path: path.into(),
-                    name: row.get(1)?,
-                    extension: row.get(2)?,
-                    size_bytes: size.max(0) as u64,
-                    modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
-                })
+                map_search_result
             })?;
             rows.collect()
         } else {
@@ -759,16 +750,7 @@ impl Database {
                  ORDER BY name COLLATE NOCASE"
             )?;
             let rows = statement.query_map([pattern], |row| {
-                let path: String = row.get(0)?;
-                let size: i64 = row.get(3)?;
-            let modified: Option<i64> = row.get(4)?;
-                Ok(SearchResult {
-                    path: path.into(),
-                    name: row.get(1)?,
-                    extension: row.get(2)?,
-                    size_bytes: size.max(0) as u64,
-                    modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
-                })
+                map_search_result
             })?;
             rows.collect()
         }
