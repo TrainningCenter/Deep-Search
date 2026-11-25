@@ -89,6 +89,17 @@ fn spawn_filesystem_watcher(
             Ok(watcher) => watcher,
             Err(error) => {
                 eprintln!("Filesystem notifications unavailable; using periodic reconciliation: {error}");
+                if let Ok(_guard) = index_lock.lock() {
+                    if let Ok(roots) = engine.index_roots() {
+                        let paths = roots.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+                        let report = engine.index_paths(&paths);
+                        eprintln!(
+                            "Startup fallback reconciliation complete: {} discovered, {} saved, {} removed, {} errors",
+                            report.files_discovered, report.files_saved,
+                            report.files_removed, report.errors
+                        );
+                    }
+                }
                 loop {
                     thread::sleep(Duration::from_secs(600));
                     if let Ok(_guard) = index_lock.lock() {
