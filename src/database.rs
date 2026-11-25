@@ -734,9 +734,7 @@ impl Database {
                  WHERE id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?1)
                  ORDER BY name COLLATE NOCASE"
             )?;
-            let rows = statement.query_map([phrase], |row| {
-                map_search_result
-            })?;
+            let rows = statement.query_map([phrase], map_search_result)?;
             rows.collect()
         } else {
             let escaped = term
@@ -749,9 +747,7 @@ impl Database {
                  WHERE content LIKE ?1 ESCAPE '\\' COLLATE NOCASE
                  ORDER BY name COLLATE NOCASE"
             )?;
-            let rows = statement.query_map([pattern], |row| {
-                map_search_result
-            })?;
+            let rows = statement.query_map([pattern], map_search_result)?;
             rows.collect()
         }
     }
