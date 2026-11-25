@@ -136,6 +136,15 @@ fn logout_state_transition(
 /// Returns Some(true/false) when the current account's interactive sessions can
 /// be queried. None means the platform session query is unavailable; in that
 /// case the service stays running rather than stopping unexpectedly.
+#[cfg(target_os = "windows")]
+fn windows_output_has_session(output: &str, username: &str) -> bool {
+    output.lines().skip(1).any(|line| {
+        let session_user = line.split_whitespace().next().unwrap_or("").trim_start_matches('>');
+        session_user.rsplit('\\').next().unwrap_or(session_user)
+            .eq_ignore_ascii_case(username)
+    })
+}
+
 fn current_user_session_state() -> Option<bool> {
     use std::process::Command;
 
@@ -165,18 +174,12 @@ fn current_user_session_state() -> Option<bool> {
         let username = std::env::var("USERNAME").ok()?;
         let output = Command::new("query").arg("user").output().ok()?;
         let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
         if !output.status.success() {
-            return if stdout.trim().is_empty() || stdout.contains("No User exists") {
-                Some(false)
-            } else {
-                None
-            };
+            let combined = format!("{stdout}\n{stderr}");
+            return if combined.contains("No User exists") { Some(false) } else { None };
         }
-        return Some(stdout.lines().skip(1).any(|line| {
-            let session_user = line.split_whitespace().next().unwrap_or("").trim_start_matches('>');
-            session_user.rsplit('\\').next().unwrap_or(session_user)
-                .eq_ignore_ascii_case(&username)
-        }));
+        return Some(windows_output_has_session(&stdout, &username));
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -552,6 +555,15 @@ mod logout_monitor_tests {
         assert!(!seen);
         assert_eq!(empty, 0);
         assert!(!stop);
+    }
+
+    #[test]
+    fn windows_session_output_matches_local_and_domain_user_names() {
+        let output = "USERNAME SESSIONNAME ID STATE\n>training console 1 Active none\n";
+        assert!(super::windows_output_has_session(output, "training"));
+        let domain_output = "USERNAME SESSIONNAME ID STATE\nDOMAIN\\training console 1 Active none\n";
+        assert!(super::windows_output_has_session(domain_output, "training"));
+        assert!(!super::windows_output_has_session(output, "another-user"));
     }
 
     #[test]
