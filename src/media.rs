@@ -134,9 +134,11 @@ fn parse_u32(value: &Value) -> Option<u32> {
 }
 
 fn parse_frame_rate(value: &str) -> Option<u32> {
-    let (numerator, denominator) = value.split_once('/')
-        .map(|(left, right)| (left.parse::<f64>().ok()?, right.parse::<f64>().ok()?))
-        .unwrap_or_else(|| (value.parse::<f64>().unwrap_or(0.0), 1.0));
+    let (numerator, denominator) = if let Some((left, right)) = value.split_once('/') {
+        (left.parse::<f64>().ok()?, right.parse::<f64>().ok()?)
+    } else {
+        (value.parse::<f64>().ok()?, 1.0)
+    };
     if !numerator.is_finite() || !denominator.is_finite() || denominator <= 0.0 || numerator <= 0.0 {
         return None;
     }
