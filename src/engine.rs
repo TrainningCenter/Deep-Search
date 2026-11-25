@@ -319,4 +319,57 @@ mod content_indexing_tests {
         assert!(extract_text(&large, 1024 * 1024 + 1).is_none());
         fs::remove_file(large).unwrap();
     }
+    #[test]
+    fn persists_index_roots_and_never_indexes_its_own_database_files() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "deep-search-self-index-{}-{unique}", std::process::id()
+        ));
+        let root = base.join("data");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("document.txt"), b"searchable").unwrap();
+
+        let database_path = root.join("index.sqlite");
+        let engine = SearchEngine::open(&database_path).unwrap();
+        let report = engine.index_paths(&[root.as_path()]);
+
+        assert_eq!(report.errors, 0);
+        assert_eq!(report.files_discovered, 1);
+        assert_eq!(report.files_saved, 1);
+        assert_eq!(engine.index_roots().unwrap(), vec![root.clone()]);
+        assert!(engine.search_by_name("index.sqlite").unwrap().is_empty());
+        assert_eq!(engine.indexed_file_count().unwrap(), 1);
+
+        drop(engine);
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn refreshes_a_changed_file_and_removes_deleted_paths() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "deep-search-watch-refresh-{}-{unique}", std::process::id()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        let file = base.join("watch-me.txt");
+        fs::write(&file, b"first version").unwrap();
+
+        let engine = SearchEngine::open(base.join("index.sqlite")).unwrap();
+        let first = engine.index_paths(&[base.as_path()]);
+        assert_eq!(first.files_saved, 1);
+
+        fs::write(&file, b"second version with more bytes").unwrap();
+        let changed = engine.refresh_changed_paths(std::slice::from_ref(&file));
+        assert_eq!(changed.files_saved, 1);
+        assert!(engine.search_content("second version").unwrap().len() == 1);
+
+        fs::remove_file(&file).unwrap();
+        let removed = engine.refresh_changed_paths(std::slice::from_ref(&file));
+        assert_eq!(removed.files_removed, 1);
+        assert!(engine.search_by_name("watch-me").unwrap().is_empty());
+
+        drop(engine);
+        fs::remove_dir_all(base).unwrap();
+    }
+
 }
