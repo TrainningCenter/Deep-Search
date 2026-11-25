@@ -621,7 +621,7 @@ mod tests {
     fn service_bind_rejects_non_loopback_interfaces() {
         for address in ["0.0.0.0:4765", "[::]:4765", "192.0.2.10:4765"] {
             let error = bind_service_listener(address, false).unwrap_err();
-            assert!(error.to_string().contains("non-loopback interface"));
+            assert!(error.to_string().contains("outside loopback"));
         }
     }
 
