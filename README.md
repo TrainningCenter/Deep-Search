@@ -122,6 +122,8 @@ Check or control the service with the installed helper:
 deep-search-service status "$USER"
 deep-search-service is-active "$USER"
 deep-search-service is-enabled "$USER"
+deep-search-service logs "$USER"
+deep-search-service logs-follow "$USER"
 sudo deep-search-service start "$USER"
 sudo deep-search-service stop "$USER"
 sudo deep-search-service restart "$USER"
@@ -129,7 +131,7 @@ sudo deep-search-service enable "$USER"
 sudo deep-search-service disable "$USER"
 ```
 
-`enable` and `disable` control automatic startup at boot; they do not start or stop the running process. Use `start` or `stop` for runtime control. The helper validates the Linux account and refuses to manage a root-owned instance.
+`enable` and `disable` control automatic startup at boot; they do not start or stop the running process. Use `start` or `stop` for runtime control. `logs` shows the latest 100 journal entries and `logs-follow` streams new entries. The helper validates the Linux account and refuses to manage a root-owned instance.
 
 To uninstall only that user's service instance (the index database is preserved):
 
