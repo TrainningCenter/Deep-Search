@@ -8,7 +8,7 @@ RUN cargo build --release --bin deep-search
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libgcc-s1 \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg libgcc-s1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 deepsearch \
     && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin deepsearch \
