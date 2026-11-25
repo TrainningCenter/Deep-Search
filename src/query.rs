@@ -116,7 +116,7 @@ fn parse_condition(token: &str) -> Result<SearchExpression, String> {
     }
     if lower.starts_with("size>=") { return Ok(SearchExpression::SizeAtLeast(parse_size(&token[6..])?)); }
     if lower.starts_with("size<=") { return Ok(SearchExpression::SizeAtMost(parse_size(&token[6..])?)); }
-    Err(format!("Unknown condition '{token}'. Use name:, ext:, size>= or size<="))
+    Err(format!("Unknown condition '{token}'. Use name:, path:, content:, ext:, type:, size>= or size<="))
 }
 
 fn parse_size(value: &str) -> Result<u64, String> {
