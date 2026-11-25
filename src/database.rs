@@ -942,6 +942,25 @@ mod database_tests {
     }
 
     #[test]
+    fn migrates_existing_source_roots_to_enabled_by_default() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("deep-search-roots-migration-{unique}.sqlite"));
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection.execute("CREATE TABLE index_roots(path TEXT PRIMARY KEY)", []).unwrap();
+            connection.execute("INSERT INTO index_roots(path) VALUES (?1)", ["/legacy/source"]).unwrap();
+        }
+        {
+            let db = Database::open(&path).unwrap();
+            assert_eq!(
+                db.index_roots_with_state().unwrap(),
+                vec![(PathBuf::from("/legacy/source"), true)]
+            );
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn source_roots_can_be_excluded_and_restored_without_deleting_indexed_files() {
         let db = Database::open(":memory:").unwrap();
         let root = PathBuf::from("/mnt/media");

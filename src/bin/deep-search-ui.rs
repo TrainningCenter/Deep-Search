@@ -174,10 +174,10 @@ impl UiSettings {
         if settings.profiles.is_empty() {
             settings.profiles.insert("Default".into(), default_profile(&["name", "extension", "size", "source", "path"]));
             settings.profiles.insert("Videos".into(), default_profile(&["name", "extension", "duration", "resolution", "video_codec", "audio_codec", "frame_rate", "size", "source", "modified", "path"]));
-            settings.profiles.insert("Audio".into(), default_profile(&["name", "extension", "duration", "audio_codec", "bit_rate", "sample_rate", "channels", "size", "path"]));
-            settings.profiles.insert("Images".into(), default_profile(&["name", "extension", "resolution", "image_format", "camera_make", "camera_model", "captured_at", "orientation", "size", "path"]));
-            settings.profiles.insert("Documents".into(), default_profile(&["name", "extension", "modified", "size", "path"]));
-            settings.profiles.insert("Large files".into(), default_profile(&["name", "size", "extension", "path"]));
+            settings.profiles.insert("Audio".into(), default_profile(&["name", "extension", "duration", "audio_codec", "bit_rate", "sample_rate", "channels", "size", "source", "path"]));
+            settings.profiles.insert("Images".into(), default_profile(&["name", "extension", "resolution", "image_format", "camera_make", "camera_model", "captured_at", "orientation", "size", "source", "path"]));
+            settings.profiles.insert("Documents".into(), default_profile(&["name", "extension", "modified", "size", "source", "path"]));
+            settings.profiles.insert("Large files".into(), default_profile(&["name", "size", "extension", "source", "path"]));
             settings.profiles.insert("NAS".into(), default_profile(&["name", "size", "source", "modified", "path"]));
             settings.active_profile = "Default".into();
             settings.save();
@@ -197,7 +197,7 @@ impl UiSettings {
         if !settings.profiles.contains_key("Images") {
             settings.profiles.insert("Images".into(), default_profile(&[
                 "name", "extension", "resolution", "image_format", "camera_make",
-                "camera_model", "captured_at", "orientation", "size", "path",
+                "camera_model", "captured_at", "orientation", "size", "source", "path",
             ]));
             migrated = true;
         }

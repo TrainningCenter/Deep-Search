@@ -673,6 +673,7 @@ mod tests {
         assert!(response["error"].as_str().unwrap().contains("Unknown command"));
 
         drop(engine);
+        let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_file(db_path);
     }
 
@@ -792,6 +793,22 @@ mod tests {
         assert_eq!(response["data"]["indexing_paused"], false);
         assert!(response["data"]["logout_detection_available"].is_boolean());
         assert_eq!(response["data"]["version"], crate::VERSION);
+
+        let root = std::env::temp_dir().join(format!("deep-search-service-root-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let root_string = root.to_string_lossy().to_string();
+        engine.index_paths(&[root_string.clone()]);
+        let refreshed = handle_request(r#"{"command":"status"}"#, &engine);
+        assert!(refreshed["data"]["index_roots"].as_array().unwrap().iter()
+            .any(|entry| entry["path"] == root_string && entry["enabled"] == true));
+        let toggle_request = serde_json::json!({
+            "command": "set_root_enabled",
+            "path": root_string,
+            "enabled": false
+        }).to_string();
+        let toggled = handle_request(&toggle_request, &engine);
+        assert_eq!(toggled["ok"], true);
+        assert_eq!(toggled["data"]["enabled"], false);
 
         let paused = handle_request(r#"{"command":"pause_indexing"}"#, &engine);
         assert_eq!(paused["ok"], true);

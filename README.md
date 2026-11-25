@@ -115,6 +115,11 @@ The desktop alpha currently provides automatic connection to the local service o
 
 ## Current capabilities
 
+- Per-source search inclusion controls: disable a source from the result set without deleting its index or stopping its background indexing; the source can be re-enabled immediately.
+- Every result carries its originating source path in a dedicated, sortable **Source** column; use `source:"/mnt/nas"` to filter by source.
+- Advanced Search Builder supports multiple AND/OR conditions, enabling/disabling and reordering individual conditions, and saving named search layouts.
+- Media duration filters support seconds, minutes, hours, and clock notation, for example `duration>=90s`, `duration<=2h`, and `duration>=1:30`.
+- Image metadata includes dimensions, detected format, and available EXIF camera make/model, capture time, and orientation; the Images view profile exposes these fields.
 - Incremental file indexing with batched SQLite writes and parallel CPU-based document extraction.
 - Persistent indexing roots and automatic filesystem change monitoring (create, modify, rename, delete) with debounced targeted refreshes; a 10-minute reconciliation pass catches missed events and changes on filesystems with limited notification support.
 - SQLite-backed metadata storage and full-text content search (FTS5).
@@ -163,6 +168,8 @@ deep-search query index.sqlite 'name:"holiday video" AND (ext:mkv OR ext:mp4) AN
 deep-search query index.sqlite 'type:document AND path:"project archive"'
 deep-search query index.sqlite 'content:"project roadmap" AND ext:pdf'
 deep-search query index.sqlite 'NOT ext:tmp AND size<=500MB'
+deep-search query index.sqlite 'type:video AND duration>=90s AND fps:>=60'
+deep-search query index.sqlite 'source:"/mnt/nas" AND ext:mp4'
 ```
 
 Get a bounded page of results:
