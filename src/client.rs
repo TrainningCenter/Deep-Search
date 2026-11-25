@@ -44,17 +44,36 @@ impl ServiceClient {
         self.request(json!({"command": "index", "paths": paths}))
     }
 
-    /// Fetches every match automatically. The service's 1000-record limit is
-    /// only a transport batch size; callers receive one continuous collection.
+    /// Fetches every match automatically and reports each completed transport batch.
+    /// The batch size is an internal transport detail, never a cap on total matches.
     pub fn search_all(
         &self,
         query: &str,
         sort: &str,
         order: &str,
     ) -> Result<CompleteSearch, Box<dyn Error>> {
+        let mut results = Vec::new();
+        let total = self.search_with_batches(query, sort, order, |batch, _, _| {
+            results.extend(batch);
+        })?;
+        Ok(CompleteSearch { results, total })
+    }
+
+    /// Retrieves all matches while delivering each batch as soon as it arrives.
+    /// This lets desktop clients display results progressively without waiting
+    /// for the entire result set to be transferred.
+    pub fn search_with_batches<F>(
+        &self,
+        query: &str,
+        sort: &str,
+        order: &str,
+        mut on_batch: F,
+    ) -> Result<u64, Box<dyn Error>>
+    where
+        F: FnMut(Vec<Value>, u64, u64),
+    {
         let mut offset = 0_u64;
         let mut expected_total = None;
-        let mut results = Vec::new();
 
         loop {
             let response = self.request(json!({
@@ -85,9 +104,10 @@ impl ServiceClient {
             }
 
             let received = batch.len() as u64;
-            results.extend(batch.iter().cloned());
+            let batch = batch.to_vec();
             offset = offset.checked_add(received)
                 .ok_or("Search result offset overflowed")?;
+            on_batch(batch, offset, total);
 
             let has_more = response.get("has_more").and_then(Value::as_bool)
                 .ok_or("Search response is missing has_more")?;
@@ -97,7 +117,7 @@ impl ServiceClient {
                         "Incomplete search response: received {offset} of {total} results"
                     ).into());
                 }
-                return Ok(CompleteSearch { results, total });
+                return Ok(total);
             }
             if offset >= total {
                 return Err("Service reported more results after the reported total".into());
