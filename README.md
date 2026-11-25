@@ -38,21 +38,16 @@ These are alpha builds. The workflow runs the automated tests before packaging; 
 
 The Docker image runs the indexing/search engine without a desktop window. Keep the desktop UI on the host; it connects to the container through the loopback service port.
 
-1. Download the repository source ZIP from GitHub and extract it.
-2. Create a `scan` folder beside `Dockerfile` and `compose.yaml`, or edit the bind mount in `compose.yaml` to point directly to a mounted NAS/network share.
-3. For a prebuilt Linux x64 image, download the `deep-search-docker-linux-x64` artifact from the Alpha Builds workflow, extract it, and load the image:
+1. Download and extract the `deep-search-docker-linux-x64` artifact from the Alpha Builds workflow. It includes the image archive, checksum, `Dockerfile`, `compose.yaml`, and this README.
+2. Create a `scan` folder beside `compose.yaml`, or edit the bind mount to point directly to a mounted NAS/network share.
+3. Load the prebuilt image and start the service:
 
 ```bash
 docker load -i deep-search-docker-linux-x64.tar
-```
-
-4. From the source directory, start the prebuilt image:
-
-```bash
 docker compose up -d
 ```
 
-To build the image locally instead, use `docker compose up -d --build`.
+To build the image from the repository source ZIP instead, use `docker compose up -d --build`.
 
 The Compose file binds the service to `127.0.0.1:4765` only, stores the index in a persistent Docker volume, and mounts `./scan` read-only at `/scan`. In the desktop application's indexing-path field, enter `/scan`. For a NAS mount, replace `./scan:/scan:ro` with the host mount, for example `/mnt/nas:/scan:ro`.
 
