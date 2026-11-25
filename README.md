@@ -97,11 +97,11 @@ Available request examples (send each as a single line):
 ```json
 {"command":"status"}
 {"command":"index","paths":["/home/user/Documents","/mnt/storage"]}
-{"command":"search","query":"type:video AND (ext:mkv OR ext:mp4)"}
+{"command":"search","query":"type:video AND (ext:mkv OR ext:mp4)","limit":50,"offset":0,"sort":"size","order":"desc"}
 {"command":"content","term":"quarterly revenue"}
 ```
 
-The service currently supports `status`, `index`, `search` (up to 100 results), and `content`. Responses contain `ok: true` and a `data` object on success, or `ok: false` and an `error` string on failure.
+The service currently supports `status`, `index`, `search`, and `content`. Search accepts optional `limit` (1–1000, default 100), `offset` (default 0), `sort` (`relevance`, `name`, `path`, `extension`, `size`, or `modified`), and `order` (`asc` or `desc`). The response includes `results`, `total`, `limit`, `offset`, and `has_more`. Responses contain `ok: true` and a `data` object on success, or `ok: false` and an `error` string on failure.
 
 **Security and lifecycle:** the service is loopback-only by default and has no authentication, TLS, or remote/NAS transport. Do not expose it to an untrusted network. Linux systemd boot startup is available; tray integration and Windows/macOS service installers remain future work.
 
