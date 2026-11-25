@@ -58,7 +58,7 @@ docker compose logs -f
 docker compose down
 ```
 
-The service has no authentication/TLS layer yet and now enforces loopback-only binding, rejecting non-loopback addresses even when explicitly requested. Remote service access must wait for the secured transport implementation.
+The service has no authentication/TLS layer yet and enforces loopback-only binding for normal host installations. The Docker image has an explicit container mode so the service can bind to the isolated container bridge; the supplied Compose file publishes it on host loopback only (`127.0.0.1:4765`). Do not change that host binding to `0.0.0.0` or expose the container port to an untrusted network. Remote service access must wait for the secured transport implementation.
 
 # Desktop application (alpha)
 
