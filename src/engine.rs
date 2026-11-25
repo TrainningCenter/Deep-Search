@@ -3,7 +3,7 @@ use crate::content::extract_text;
 use crate::database::{Database, SearchExpression, SearchResult, SearchSortDirection, SearchSortField};
 use crate::indexer::scan_paths_batched;
 use rusqlite::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 
 #[derive(Debug, Default)]
@@ -18,12 +18,19 @@ pub struct IndexingReport {
 
 pub struct SearchEngine {
     database: Database,
+    database_path: PathBuf,
 }
 
 impl SearchEngine {
     pub fn open<P: AsRef<Path>>(database_path: P) -> Result<Self> {
-        let database = Database::open(database_path)?;
-        Ok(Self { database })
+        let requested_path = database_path.as_ref().to_path_buf();
+        let database = Database::open(&requested_path)?;
+        let database_path = std::fs::canonicalize(&requested_path).unwrap_or(requested_path);
+        Ok(Self { database, database_path })
+    }
+
+    pub fn index_roots(&self) -> Result<Vec<PathBuf>> {
+        self.database.index_roots()
     }
 
     pub fn index_paths<P: AsRef<Path>>(
@@ -31,6 +38,9 @@ impl SearchEngine {
         paths: &[P],
     ) -> IndexingReport {
         const INDEX_BATCH_SIZE: usize = 128;
+        if self.database.add_index_roots(paths).is_err() {
+            return IndexingReport { errors: 1, ..IndexingReport::default() };
+        }
         let scan_id = match self.database.begin_scan() {
             Ok(id) => id,
             Err(_) => {
@@ -43,15 +53,27 @@ impl SearchEngine {
 
         let mut report = IndexingReport::default();
         let mut indexing_failed = false;
+        let mut internal_files_skipped = 0_u64;
 
         let scan = scan_paths_batched(paths, INDEX_BATCH_SIZE, |batch| {
-            if self.database.mark_scan_seen(scan_id, batch).is_err() {
+            let filtered_batch = batch.iter().filter(|file| {
+                if is_database_sidecar(&file.path, &self.database_path) {
+                    internal_files_skipped += 1;
+                    false
+                } else {
+                    true
+                }
+            }).cloned().collect::<Vec<_>>();
+            if filtered_batch.is_empty() {
+                return true;
+            }
+            if self.database.mark_scan_seen(scan_id, &filtered_batch).is_err() {
                 indexing_failed = true;
                 return false;
             }
 
-            let mut pending_batch = Vec::with_capacity(batch.len());
-            for file in batch {
+            let mut pending_batch = Vec::with_capacity(filtered_batch.len());
+            for file in &filtered_batch {
                 match self.database.is_file_unchanged(file) {
                     Ok(true) => {
                         report.files_unchanged += 1;
@@ -80,7 +102,7 @@ impl SearchEngine {
             true
         });
 
-        report.files_discovered = scan.files_discovered;
+        report.files_discovered = scan.files_discovered.saturating_sub(internal_files_skipped);
         report.directories_scanned = scan.directories_scanned;
         report.errors += scan.errors;
 
@@ -157,6 +179,21 @@ impl SearchEngine {
     ) -> Result<Vec<SearchResult>> {
         self.database.search_by_size_range(min_bytes, max_bytes)
     }
+}
+
+fn is_database_sidecar(candidate: &Path, database_path: &Path) -> bool {
+    let database = database_path.to_string_lossy().into_owned();
+    let candidates = [
+        database_path.to_path_buf(),
+        PathBuf::from(format!("{database}-wal")),
+        PathBuf::from(format!("{database}-shm")),
+        PathBuf::from(format!("{database}-journal")),
+    ];
+    candidates.iter().any(|path| {
+        candidate == path
+            || (std::fs::canonicalize(candidate).ok().is_some()
+                && std::fs::canonicalize(candidate).ok() == std::fs::canonicalize(path).ok())
+    })
 }
 
 #[cfg(test)]
