@@ -286,9 +286,10 @@ impl DeepSearchApp {
             columns.swap(index, target);
             changed = true;
         }
+        let arabic = self.arabic;
         let row_height = &mut self.active_profile_mut().row_height;
         ui.horizontal(|ui| {
-            ui.label(if self.arabic { "ارتفاع الصف" } else { "Row height" });
+            ui.label(if arabic { "ارتفاع الصف" } else { "Row height" });
             changed |= ui.add(egui::Slider::new(row_height, 18.0..=60.0).suffix(" px")).changed();
         });
         if ui.button(if self.arabic { "ملاءمة تلقائية للأعمدة" } else { "Auto-fit columns" }).clicked() {
