@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::process::Command;
+use std::sync::OnceLock;
+
+static FFPROBE_EXECUTABLE: OnceLock<Option<OsString>> = OnceLock::new();
 
 const VIDEO_EXTENSIONS: &[&str] = &[
     "asf", "avi", "divx", "f4v", "flv", "m1v", "m2v", "m4v", "mkv", "mov",
@@ -40,7 +44,7 @@ pub fn extract_media_metadata(path: &Path, extension: Option<&str>) -> Option<Me
         return None;
     }
 
-    let executable = std::env::var_os("DEEP_SEARCH_FFPROBE").unwrap_or_else(|| "ffprobe".into());
+    let executable = ffprobe_executable()?;
     let output = Command::new(executable)
         .args([
             "-v", "error",
@@ -59,6 +63,18 @@ pub fn extract_media_metadata(path: &Path, extension: Option<&str>) -> Option<Me
     }
 
     parse_ffprobe_json(&output.stdout)
+}
+
+fn ffprobe_executable() -> Option<&'static OsStr> {
+    FFPROBE_EXECUTABLE.get_or_init(|| {
+        let candidate = std::env::var_os("DEEP_SEARCH_FFPROBE").unwrap_or_else(|| "ffprobe".into());
+        Command::new(&candidate)
+            .arg("-version")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|_| candidate)
+    }).as_deref()
 }
 
 fn parse_ffprobe_json(bytes: &[u8]) -> Option<MediaMetadata> {
