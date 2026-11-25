@@ -176,7 +176,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
-            for _ in 0..2 {
+            for expected_offset in [0_u64, 1000, 2000] {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut line = String::new();
                 BufReader::new(stream.try_clone().unwrap()).read_line(&mut line).unwrap();
@@ -184,7 +184,8 @@ mod tests {
                 assert_eq!(request["command"], "search");
                 assert_eq!(request["limit"], 1000);
                 let offset = request["offset"].as_u64().unwrap();
-                let count = if offset == 0 { 1000 } else { 5 };
+                assert_eq!(offset, expected_offset);
+                let count = if offset < 2000 { 1000 } else { 505 };
                 let results: Vec<Value> = (offset..offset + count)
                     .map(|index| json!({
                         "name": format!("report-{index:04}.txt"),
@@ -195,10 +196,10 @@ mod tests {
                     "ok": true,
                     "data": {
                         "results": results,
-                        "total": 1005,
+                        "total": 2505,
                         "limit": 1000,
                         "offset": offset,
-                        "has_more": offset + count < 1005
+                        "has_more": offset + count < 2505
                     }
                 });
                 serde_json::to_writer(&mut stream, &response).unwrap();
@@ -210,10 +211,10 @@ mod tests {
             .search_all("name:report", "name", "asc").unwrap();
         server.join().unwrap();
 
-        assert_eq!(complete.total, 1005);
-        assert_eq!(complete.results.len(), 1005);
+        assert_eq!(complete.total, 2505);
+        assert_eq!(complete.results.len(), 2505);
         assert_eq!(complete.results.first().unwrap()["name"], "report-0000.txt");
-        assert_eq!(complete.results.last().unwrap()["name"], "report-1004.txt");
+        assert_eq!(complete.results.last().unwrap()["name"], "report-2504.txt");
     }
 
     #[test]
