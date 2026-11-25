@@ -702,7 +702,17 @@ mod tests {
 
         assert_eq!(response["ok"], true);
         assert_eq!(response["data"]["indexed_files"], 0);
+        assert_eq!(response["data"]["stop_on_logout"], false);
         assert_eq!(response["data"]["version"], crate::VERSION);
+
+        let updated = handle_request(
+            r#"{"command":"set_stop_on_logout","enabled":true}"#,
+            &engine,
+        );
+        assert_eq!(updated["ok"], true);
+        assert_eq!(updated["data"]["stop_on_logout"], true);
+        let refreshed = handle_request(r#"{"command":"status"}"#, &engine);
+        assert_eq!(refreshed["data"]["stop_on_logout"], true);
 
         drop(engine);
         let _ = std::fs::remove_file(db_path);
