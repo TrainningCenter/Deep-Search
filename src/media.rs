@@ -206,6 +206,7 @@ fn parse_ffprobe_json(bytes: &[u8]) -> Option<MediaMetadata> {
         bit_rate,
         sample_rate: audio.and_then(|stream| stream.get("sample_rate")).and_then(parse_u32),
         channels: audio.and_then(|stream| stream.get("channels")).and_then(parse_u32),
+        ..Default::default()
     };
 
     let has_metadata = metadata.duration_ms.is_some()
