@@ -476,7 +476,31 @@ impl DeepSearchApp {
                 for column in &columns {
                     row.col(|ui| {
                         let value = result_column_text(result, &column.key);
-                        ui.add(egui::Label::new(value).truncate());
+                        if column.key == "name" {
+                            let path = result.get("path").and_then(Value::as_str).unwrap_or("").to_owned();
+                            let response = ui.add(
+                                egui::Label::new(value).truncate().sense(egui::Sense::click())
+                            );
+                            if response.double_clicked() && !path.is_empty() {
+                                open_path_in_default_app(path.clone());
+                            }
+                            response.context_menu(|ui| {
+                                if ui.add_enabled(!path.is_empty(), egui::Button::new(
+                                    if self.arabic { "فتح الملف" } else { "Open file" }
+                                )).clicked() {
+                                    open_path_in_default_app(path.clone());
+                                    ui.close_menu();
+                                }
+                                if ui.add_enabled(!path.is_empty(), egui::Button::new(
+                                    if self.arabic { "نسخ المسار الكامل" } else { "Copy full path" }
+                                )).clicked() {
+                                    ui.ctx().copy_text(path.clone());
+                                    ui.close_menu();
+                                }
+                            });
+                        } else {
+                            ui.add(egui::Label::new(value).truncate());
+                        }
                     });
                 }
             });
@@ -769,6 +793,24 @@ fn command_output_result(output: std::process::Output) -> Result<String, String>
     } else {
         Err(if stderr.is_empty() { stdout } else { stderr })
     }
+}
+
+fn open_path_in_default_app(path: String) {
+    thread::spawn(move || {
+        use std::process::Command;
+        #[cfg(target_os = "windows")]
+        let result = Command::new("cmd.exe").args(["/C", "start", ""]).arg(&path).spawn();
+        #[cfg(target_os = "macos")]
+        let result = Command::new("open").arg(&path).spawn();
+        #[cfg(target_os = "linux")]
+        let result = Command::new("xdg-open").arg(&path).spawn();
+        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+        let result: Result<std::process::Child, std::io::Error> =
+            Err(std::io::Error::other("Opening files is unsupported on this platform"));
+        if let Err(error) = result {
+            eprintln!("Could not open {}: {error}", path);
+        }
+    });
 }
 
 fn column_label(key: &str, arabic: bool) -> &'static str {
