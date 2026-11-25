@@ -315,7 +315,11 @@ impl DeepSearchApp {
         let mut table = TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+            .cell_layout(if self.arabic {
+                egui::Layout::right_to_left(egui::Align::Center)
+            } else {
+                egui::Layout::left_to_right(egui::Align::Center)
+            });
         for column in &columns {
             table = table.column(Column::initial(column.width).at_least(60.0));
         }
@@ -354,6 +358,18 @@ impl DeepSearchApp {
 impl eframe::App for DeepSearchApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.receive_messages();
+        let dropped_files = ctx.input(|input| input.raw.dropped_files.clone());
+        for dropped in dropped_files {
+            if let Some(path) = dropped.path {
+                let path = path.to_string_lossy().to_string();
+                if !self.roots.lines().any(|existing| existing.trim() == path) {
+                    if !self.roots.is_empty() && !self.roots.ends_with('\\n') {
+                        self.roots.push('\\n');
+                    }
+                    self.roots.push_str(&path);
+                }
+            }
+        }
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Deep-Search");
@@ -383,7 +399,12 @@ impl eframe::App for DeepSearchApp {
             });
         });
 
-        egui::SidePanel::left("sources").resizable(true).default_width(290.0).show(ctx, |ui| {
+        let source_panel = if self.arabic {
+            egui::SidePanel::right("sources")
+        } else {
+            egui::SidePanel::left("sources")
+        };
+        source_panel.resizable(true).default_width(290.0).show(ctx, |ui| {
             ui.heading(if self.arabic { "الخدمة" } else { "Service" });
             ui.label(if self.arabic { "عنوان الخدمة" } else { "Address" });
             ui.text_edit_singleline(&mut self.service_address);
@@ -415,7 +436,12 @@ impl eframe::App for DeepSearchApp {
             ui.label(&self.message);
         });
 
-        egui::SidePanel::right("view_settings").resizable(true).default_width(270.0).show(ctx, |ui| {
+        let view_panel = if self.arabic {
+            egui::SidePanel::left("view_settings")
+        } else {
+            egui::SidePanel::right("view_settings")
+        };
+        view_panel.resizable(true).default_width(270.0).show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| self.render_column_controls(ui));
         });
 
