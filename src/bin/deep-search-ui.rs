@@ -1233,6 +1233,76 @@ fn native_folder_picker() -> Vec<String> {
     }
 }
 
+
+fn nas_path_available(path: &str) -> bool {
+    let target = PathBuf::from(path);
+    if !target.is_absolute() {
+        return false;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(mounts) = std::fs::read_to_string("/proc/self/mountinfo") else {
+            return false;
+        };
+        let target = std::fs::canonicalize(&target).unwrap_or(target);
+        let matching_network_mount = mounts.lines().filter_map(|line| {
+            let (left, right) = line.split_once(" - ")?;
+            let fields = left.split_whitespace().collect::<Vec<_>>();
+            let fs_type = right.split_whitespace().next()?;
+            let mount_point = fields.get(4)?;
+            if !is_network_filesystem(fs_type) {
+                return None;
+            }
+            let decoded = mount_point
+                .replace("\\040", " ")
+                .replace("\\011", "\t")
+                .replace("\\012", "\n")
+                .replace("\\134", "\\");
+            let mount_path = PathBuf::from(decoded);
+            target.starts_with(&mount_path).then_some(mount_path)
+        }).max_by_key(|mount| mount.components().count());
+        return matching_network_mount.is_some() && target.is_dir();
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let Ok(output) = std::process::Command::new("mount").output() else {
+            return false;
+        };
+        let listing = String::from_utf8_lossy(&output.stdout);
+        let matching_network_mount = listing.lines().filter_map(|line| {
+            let (source, rest) = line.split_once(" on ")?;
+            let (mount_point, options) = rest.split_once(" (")?;
+            let fs_type = options.split([',', ')']).next().unwrap_or("");
+            let network = matches!(fs_type, "smbfs" | "nfs" | "afpfs" | "webdav");
+            let mount_path = PathBuf::from(mount_point);
+            (network && target.starts_with(&mount_path)).then_some(mount_path)
+        }).max_by_key(|mount| mount.components().count());
+        return matching_network_mount.is_some() && target.is_dir();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let value = path.trim_start();
+        return value.starts_with("\\\\") && target.is_dir();
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        false
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn is_network_filesystem(fs_type: &str) -> bool {
+    matches!(
+        fs_type,
+        "nfs" | "nfs4" | "cifs" | "smb3" | "9p" | "ceph" |
+        "glusterfs" | "sshfs" | "fuse.sshfs" | "davfs" | "fuse.rclone" | "fuse.s3fs"
+    )
+}
+
 #[cfg(target_os = "linux")]
 fn service_helper(action: &str, username: &str, privileged: bool) -> Result<String, String> {
     use std::process::Command;
