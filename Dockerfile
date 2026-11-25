@@ -22,4 +22,7 @@ WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 4765
 
+# Container bridge binding is allowed only for the isolated Docker deployment.
+# compose.yaml publishes this port on host loopback only.
+ENV DEEP_SEARCH_CONTAINER_MODE=1
 ENTRYPOINT ["deep-search", "serve", "/data/index.sqlite", "0.0.0.0:4765"]
