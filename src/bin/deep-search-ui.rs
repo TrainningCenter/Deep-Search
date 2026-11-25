@@ -149,6 +149,7 @@ struct DeepSearchApp {
     service_active: Option<bool>,
     service_enabled: Option<bool>,
     stop_on_logout: Option<bool>,
+    logout_detection_available: Option<bool>,
     service_detail: String,
     service_busy: bool,
     service_checked: bool,
@@ -179,6 +180,7 @@ impl Default for DeepSearchApp {
             service_active: None,
             service_enabled: None,
             stop_on_logout: None,
+            logout_detection_available: None,
             service_detail: "Checking system service status…".to_owned(),
             service_busy: false,
             service_checked: false,
@@ -359,6 +361,7 @@ impl DeepSearchApp {
                 UiMessage::Status(status) => {
                     self.indexed_files = status.get("indexed_files").and_then(Value::as_u64);
                     self.stop_on_logout = status.get("stop_on_logout").and_then(Value::as_bool);
+                    self.logout_detection_available = status.get("logout_detection_available").and_then(Value::as_bool);
                     self.message = format!(
                         "Service connected · version {}",
                         status.get("version").and_then(Value::as_str).unwrap_or("unknown")
@@ -745,10 +748,16 @@ impl eframe::App for DeepSearchApp {
                 } else {
                     ui.label(if self.arabic { "حالة بدء التشغيل غير معروفة" } else { "Boot startup state unavailable" });
                 }
-                if let Some(current) = self.stop_on_logout {
+                if self.logout_detection_available == Some(false) {
+                    ui.label(if self.arabic {
+                        "تعذّر اكتشاف جلسات المستخدم؛ ستظل الخدمة تعمل بعد تسجيل الخروج"
+                    } else {
+                        "Session detection unavailable; the service will keep running after logout"
+                    });
+                } else if let Some(current) = self.stop_on_logout {
                     let mut stop_on_logout = current;
                     if ui.add_enabled(
-                        !self.service_busy,
+                        !self.service_busy && self.logout_detection_available == Some(true),
                         egui::Checkbox::new(
                             &mut stop_on_logout,
                             if self.arabic { "إيقاف الخدمة عند تسجيل الخروج" } else { "Stop service when user logs out" },
