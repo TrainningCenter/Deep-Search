@@ -38,7 +38,7 @@ db_path="$db_dir/index.sqlite"
 mkdir -p "$db_dir" "$log_dir" /usr/local/bin /Library/LaunchDaemons
 chown -R "$username" "$home_dir/Library/Application Support/Deep-Search" "$log_dir"
 install -m 0755 "$binary_path" /usr/local/bin/deep-search
-install -m 0755 "$(dirname -- "${BASH_SOURCE[0]}")/deep-search-service.sh" /usr/local/bin/deep-search-service
+install -m 0755 "$(dirname "${BASH_SOURCE[0]}")/deep-search-service.sh" /usr/local/bin/deep-search-service
 
 plist="/Library/LaunchDaemons/com.deepsearch.service.plist"
 cat > "$plist" <<EOF
