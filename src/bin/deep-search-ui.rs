@@ -980,7 +980,7 @@ impl eframe::App for DeepSearchApp {
                     let mut startup = enabled;
                     if ui.add_enabled(
                         !self.service_busy,
-                        egui::Checkbox::new(&mut startup, if self.arabic { "التشغيل تلقائيًا مع بدء النظام" } else { "Start automatically at boot" }),
+                        egui::Checkbox::new(&mut startup, display_text(if self.arabic { "التشغيل تلقائيًا مع بدء النظام" } else { "Start automatically at boot" })),
                     ).changed() {
                         self.control_system_service(if startup { "enable" } else { "disable" });
                     }
@@ -999,7 +999,7 @@ impl eframe::App for DeepSearchApp {
                         !self.service_busy && self.logout_detection_available == Some(true),
                         egui::Checkbox::new(
                             &mut stop_on_logout,
-                            if self.arabic { "إيقاف الخدمة عند تسجيل الخروج" } else { "Stop service when user logs out" },
+                            display_text(if self.arabic { "إيقاف الخدمة عند تسجيل الخروج" } else { "Stop service when user logs out" }),
                         ),
                     ).changed() {
                         self.set_stop_on_logout(stop_on_logout);
@@ -1045,7 +1045,7 @@ impl eframe::App for DeepSearchApp {
                         ui.selectable_value(&mut self.sort_field, field.to_owned(), field);
                     }
                 });
-            ui.checkbox(&mut self.descending, if self.arabic { "ترتيب تنازلي" } else { "Descending" });
+            ui.checkbox(&mut self.descending, display_text(if self.arabic { "ترتيب تنازلي" } else { "Descending" }));
             if ui.add_enabled(!self.busy, egui::Button::new(display_text(if self.arabic { "بحث في كل النتائج" } else { "Search all results" }))).clicked() {
                 self.search();
             }
@@ -1069,11 +1069,11 @@ impl eframe::App for DeepSearchApp {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         ui.heading(display_text(if self.arabic { "إعدادات التطبيق" } else { "Application settings" }));
                         let tray_before = self.settings.tray_enabled;
-                        let tray_changed = ui.checkbox(&mut self.settings.tray_enabled, if self.arabic { "إظهار أيقونة شريط النظام" } else { "Show system tray icon" }).changed();
-                        let close_changed = ui.checkbox(&mut self.settings.close_to_tray, if self.arabic { "إخفاء النافذة عند الإغلاق" } else { "Close window to tray" }).changed();
-                        let notify_complete_changed = ui.checkbox(&mut self.settings.notify_on_completion, if self.arabic { "إشعار عند اكتمال الفهرسة" } else { "Notify when indexing completes" }).changed();
-                        let notify_errors_changed = ui.checkbox(&mut self.settings.notify_on_errors, if self.arabic { "إشعار عند حدوث أخطاء" } else { "Notify when errors occur" }).changed();
-                        let notify_service_changed = ui.checkbox(&mut self.settings.notify_on_service_state, if self.arabic { "إشعار عند تشغيل أو إيقاف الخدمة" } else { "Notify when service starts or stops" }).changed();
+                        let tray_changed = ui.checkbox(&mut self.settings.tray_enabled, display_text(if self.arabic { "إظهار أيقونة شريط النظام" } else { "Show system tray icon" })).changed();
+                        let close_changed = ui.checkbox(&mut self.settings.close_to_tray, display_text(if self.arabic { "إخفاء النافذة عند الإغلاق" } else { "Close window to tray" })).changed();
+                        let notify_complete_changed = ui.checkbox(&mut self.settings.notify_on_completion, display_text(if self.arabic { "إشعار عند اكتمال الفهرسة" } else { "Notify when indexing completes" })).changed();
+                        let notify_errors_changed = ui.checkbox(&mut self.settings.notify_on_errors, display_text(if self.arabic { "إشعار عند حدوث أخطاء" } else { "Notify when errors occur" })).changed();
+                        let notify_service_changed = ui.checkbox(&mut self.settings.notify_on_service_state, display_text(if self.arabic { "إشعار عند تشغيل أو إيقاف الخدمة" } else { "Notify when service starts or stops" })).changed();
                         if tray_changed && tray_before != self.settings.tray_enabled {
                             if self.settings.tray_enabled {
                                 self.tray_checked = false;
