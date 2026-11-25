@@ -17,6 +17,7 @@ enum UiMessage {
     ServiceState { active: Option<bool>, enabled: Option<bool>, detail: String },
     ServiceAction { action: String, success: bool, detail: String },
     ServiceLogoutSetting { enabled: bool, success: bool, detail: String },
+    IndexingPause { paused: bool, success: bool, detail: String },
     PickedPaths(Vec<String>),
 }
 
@@ -149,6 +150,7 @@ struct DeepSearchApp {
     arabic: bool,
     service_active: Option<bool>,
     service_enabled: Option<bool>,
+    indexing_paused: Option<bool>,
     stop_on_logout: Option<bool>,
     logout_detection_available: Option<bool>,
     service_detail: String,
@@ -180,6 +182,7 @@ impl Default for DeepSearchApp {
             arabic: false,
             service_active: None,
             service_enabled: None,
+            indexing_paused: None,
             stop_on_logout: None,
             logout_detection_available: None,
             service_detail: "Checking system service status…".to_owned(),
@@ -314,6 +317,28 @@ impl DeepSearchApp {
         });
     }
 
+    fn set_indexing_paused(&mut self, paused: bool) {
+        let client = self.client();
+        let sender = self.sender.clone();
+        self.service_busy = true;
+        thread::spawn(move || {
+            let result = if paused { client.pause_indexing() } else { client.resume_indexing() };
+            let message = match result {
+                Ok(value) => UiMessage::IndexingPause {
+                    paused: value.get("indexing_paused").and_then(Value::as_bool).unwrap_or(paused),
+                    success: true,
+                    detail: if paused { "Indexing paused.".to_owned() } else { "Indexing resumed.".to_owned() },
+                },
+                Err(error) => UiMessage::IndexingPause {
+                    paused,
+                    success: false,
+                    detail: error.to_string(),
+                },
+            };
+            let _ = sender.send(message);
+        });
+    }
+
     fn index_roots(&mut self) {
         let paths: Vec<String> = self.roots.lines()
             .map(str::trim).filter(|path| !path.is_empty())
@@ -367,6 +392,7 @@ impl DeepSearchApp {
                     self.busy = false;
                     self.indexed_files = status.get("indexed_files").and_then(Value::as_u64);
                     self.stop_on_logout = status.get("stop_on_logout").and_then(Value::as_bool);
+                    self.indexing_paused = status.get("indexing_paused").and_then(Value::as_bool);
                     self.logout_detection_available = status.get("logout_detection_available").and_then(Value::as_bool);
                     self.message = format!(
                         "Service connected · version {}",
@@ -419,6 +445,15 @@ impl DeepSearchApp {
                         self.service_detail = detail;
                     } else {
                         self.service_detail = format!("Could not update logout preference: {detail}");
+                    }
+                }
+                UiMessage::IndexingPause { paused, success, detail } => {
+                    self.service_busy = false;
+                    if success {
+                        self.indexing_paused = Some(paused);
+                        self.service_detail = detail;
+                    } else {
+                        self.service_detail = format!("Could not change indexing state: {detail}");
                     }
                 }
                 UiMessage::PickedPaths(paths) => {
@@ -789,6 +824,16 @@ impl eframe::App for DeepSearchApp {
                     } else {
                         "Connect to the service to configure logout behavior"
                     });
+                }
+                if let Some(paused) = self.indexing_paused {
+                    if ui.add_enabled(
+                        !self.service_busy,
+                        egui::Button::new(if paused {
+                            if self.arabic { "استئناف الفهرسة" } else { "Resume indexing" }
+                        } else if self.arabic { "إيقاف الفهرسة مؤقتًا" } else { "Pause indexing" }),
+                    ).clicked() {
+                        self.set_indexing_paused(!paused);
+                    }
                 }
                 ui.with_layout(horizontal_layout(self.arabic), |ui| {
                     if ui.add_enabled(!self.service_busy, egui::Button::new(if self.arabic { "تشغيل" } else { "Start" })).clicked() {
