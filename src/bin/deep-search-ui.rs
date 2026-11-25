@@ -42,6 +42,7 @@ struct ViewProfile {
 fn default_frozen_columns() -> usize { 1 }
 
 fn default_enabled() -> bool { true }
+fn default_disabled() -> bool { false }
 
 #[derive(Serialize, Deserialize)]
 struct UiSettings {
@@ -51,11 +52,11 @@ struct UiSettings {
     tray_enabled: bool,
     #[serde(default = "default_enabled")]
     close_to_tray: bool,
-    #[serde(default = "default_enabled")]
+    #[serde(default = "default_disabled")]
     notify_on_completion: bool,
     #[serde(default = "default_enabled")]
     notify_on_errors: bool,
-    #[serde(default = "default_enabled")]
+    #[serde(default = "default_disabled")]
     notify_on_service_state: bool,
 }
 
@@ -66,9 +67,9 @@ impl Default for UiSettings {
             active_profile: String::new(),
             tray_enabled: true,
             close_to_tray: true,
-            notify_on_completion: true,
+            notify_on_completion: false,
             notify_on_errors: true,
-            notify_on_service_state: true,
+            notify_on_service_state: false,
         }
     }
 }
