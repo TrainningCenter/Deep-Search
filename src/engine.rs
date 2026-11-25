@@ -30,6 +30,14 @@ impl SearchEngine {
         Ok(Self { database, database_path })
     }
 
+    /// Connect to a database whose schema has already been initialized.
+    pub fn connect_existing<P: AsRef<Path>>(database_path: P) -> Result<Self> {
+        let requested_path = database_path.as_ref().to_path_buf();
+        let database = Database::connect_existing(&requested_path)?;
+        let database_path = std::fs::canonicalize(&requested_path).unwrap_or(requested_path);
+        Ok(Self { database, database_path })
+    }
+
     pub fn index_roots(&self) -> Result<Vec<PathBuf>> {
         self.database.index_roots()
     }
