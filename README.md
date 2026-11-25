@@ -61,11 +61,10 @@ These are alpha builds. Automated tests and cross-platform builds run before pub
 
 ## Docker service (headless, Linux x86_64)
 
-The Docker package contains the prebuilt image archive, Compose file, Dockerfile, README, and checksum.
+Download these three assets from the same GitHub Release into one folder: `deep-search-docker-linux-x64.tar`, `compose.yaml`, and `Dockerfile`. The `.tar` is a Docker image archive: do not unpack it with tar.
 
-1. Download and extract `deep-search-docker-linux-x64.tar`.
-2. Create a `scan` folder beside `compose.yaml`, or edit the bind mount to point to a mounted NAS/network share.
-3. Load the image and start the service:
+1. Create a `scan` folder beside `compose.yaml`, or edit the bind mount to point to a mounted NAS/network share.
+2. Load the image and start the service:
 
 ```bash
 docker load -i deep-search-docker-linux-x64.tar
