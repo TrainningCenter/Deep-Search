@@ -8,7 +8,7 @@ use std::net::{TcpListener, TcpStream};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{atomic::AtomicBool, mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -23,12 +23,14 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
     drop(engine);
 
     let index_lock = Arc::new(Mutex::new(()));
+    let indexing_paused = Arc::new(AtomicBool::new(false));
     let watcher_database_path = std::fs::canonicalize(database_path)
         .unwrap_or_else(|_| database_path.to_path_buf());
     let watch_roots = spawn_filesystem_watcher(
         watcher_database_path.clone(),
         initial_roots,
         Arc::clone(&index_lock),
+        Arc::clone(&indexing_paused),
     );
     let listener = TcpListener::bind(address)?;
     listener.set_nonblocking(true)?;
@@ -54,8 +56,11 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
                 let database_path = watcher_database_path.clone();
                 let watch_roots = watch_roots.clone();
                 let index_lock = Arc::clone(&index_lock);
+                let indexing_paused = Arc::clone(&indexing_paused);
                 client_threads.push(thread::spawn(move || {
-                    let engine = match SearchEngine::connect_existing(&database_path) {
+                    let engine = match SearchEngine::connect_existing_with_indexing_state(
+                        &database_path, indexing_paused,
+                    ) {
                         Ok(engine) => engine,
                         Err(error) => {
                             eprintln!("Could not open a client database connection: {error}");
@@ -213,10 +218,13 @@ fn spawn_filesystem_watcher(
     database_path: PathBuf,
     initial_roots: Vec<PathBuf>,
     index_lock: Arc<Mutex<()>>,
+    indexing_paused: Arc<AtomicBool>,
 ) -> mpsc::Sender<PathBuf> {
     let (root_sender, root_receiver) = mpsc::channel::<PathBuf>();
     thread::spawn(move || {
-        let engine = match SearchEngine::open(&database_path) {
+        let engine = match SearchEngine::connect_existing_with_indexing_state(
+            &database_path, indexing_paused,
+        ) {
             Ok(engine) => engine,
             Err(error) => {
                 eprintln!("Filesystem watcher could not open the index: {error}");
@@ -423,6 +431,7 @@ fn handle_request_with_context(
                 "indexed_files": engine.indexed_file_count()?,
                 "stop_on_logout": engine.stop_on_logout()?,
                 "logout_detection_available": current_user_session_state().is_some(),
+                "indexing_paused": engine.is_indexing_paused(),
                 "version": crate::VERSION
             })),
             "set_stop_on_logout" => {
@@ -430,6 +439,14 @@ fn handle_request_with_context(
                     .ok_or("Missing boolean field: enabled")?;
                 engine.set_stop_on_logout(enabled)?;
                 Ok(json!({"stop_on_logout": enabled}))
+            },
+            "pause_indexing" => {
+                engine.set_indexing_paused(true);
+                Ok(json!({"indexing_paused": true}))
+            },
+            "resume_indexing" => {
+                engine.set_indexing_paused(false);
+                Ok(json!({"indexing_paused": false}))
             },
             "index" => {
                 let paths = request.get("paths").and_then(Value::as_array)
