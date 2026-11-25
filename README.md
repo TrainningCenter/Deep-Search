@@ -1,5 +1,31 @@
 # Deep-Search
 
+# Desktop application (alpha)
+
+The first cross-platform desktop window is available behind the `desktop` feature. It connects to the background service at `127.0.0.1:4765`, lets you submit one or more indexing paths, and displays search matches in a resizable table. Search results are retrieved automatically across transport batches; the 1000-record service limit is not a cap on the total number of displayed matches.
+
+Start the background service first:
+
+```bash
+deep-search serve ~/.local/share/deep-search/index.sqlite
+```
+
+Then launch the desktop application:
+
+```bash
+deep-search-ui
+```
+
+For development, run it with:
+
+```bash
+cargo run --features desktop --bin deep-search-ui
+```
+
+The desktop alpha currently provides connection/status, indexing-path entry, query input, sorting, and a resizable results table. Saved view profiles, full column management, Arabic RTL, tray integration, and graphical folder picking are not implemented yet.
+
+
+
 A fast, lightweight, cross-platform file indexing and search engine written in Rust.
 
 ## Current capabilities
