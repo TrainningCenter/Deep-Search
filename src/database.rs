@@ -546,6 +546,17 @@ impl Database {
         rows.collect()
     }
 
+    /// Delete a file or an entire removed directory subtree from the index.
+    pub fn remove_path_tree<P: AsRef<Path>>(&self, path: P) -> Result<u64> {
+        let path = path.as_ref().to_string_lossy().into_owned();
+        let prefix = format!("{}{}", path.trim_end_matches(std::path::MAIN_SEPARATOR), std::path::MAIN_SEPARATOR);
+        let deleted = self.connection.execute(
+            "DELETE FROM files WHERE path = ?1 OR substr(path, 1, length(?2)) = ?2",
+            params![path, prefix],
+        )?;
+        Ok(deleted as u64)
+    }
+
     pub fn file_count(&self) -> Result<u64> {
         let count: i64 = self.connection.query_row(
             "SELECT COUNT(*) FROM files",
