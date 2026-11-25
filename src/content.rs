@@ -483,13 +483,13 @@ mod tests {
 
     #[test]
     fn extracts_dialogue_from_srt_and_webvtt_subtitles() {
-        let srt = "\\u{feff}1\\r\\n00:00:01,000 --> 00:00:03,000\\r\\nHello <i>world</i>\\r\\n\\r\\n2\\r\\n00:00:04,000 --> 00:00:05,000\\r\\nمرحبا بالعالم\\r\\n";
+        let srt = "\u{feff}1\r\n00:00:01,000 --> 00:00:03,000\r\nHello <i>world</i>\r\n\r\n2\r\n00:00:04,000 --> 00:00:05,000\r\nمرحبا بالعالم\r\n";
         let text = extract_subtitle_text(srt).unwrap();
         assert!(text.contains("Hello world"));
         assert!(text.contains("مرحبا بالعالم"));
         assert!(!text.contains("00:00:01"));
 
-        let vtt = "WEBVTT\\n\\nNOTE generated metadata\\nnot dialogue\\n\\n00:00:01.000 --> 00:00:02.000 align:start\\n<v Speaker>Searchable subtitle</v>\\n";
+        let vtt = "WEBVTT\n\nNOTE generated metadata\nnot dialogue\n\n00:00:01.000 --> 00:00:02.000 align:start\n<v Speaker>Searchable subtitle</v>\n";
         let text = extract_subtitle_text(vtt).unwrap();
         assert_eq!(text, "Searchable subtitle");
     }
@@ -616,7 +616,7 @@ Escaped: \{literal\} and \~ space.}"#;
             "deep-search-subtitle-{}-{unique}.srt",
             std::process::id()
         ));
-        fs::write(&path, "1\\n00:00:01,000 --> 00:00:02,000\\nQuarterly planning meeting\\n").unwrap();
+        fs::write(&path, "1\n00:00:01,000 --> 00:00:02,000\nQuarterly planning meeting\n").unwrap();
         let size = fs::metadata(&path).unwrap().len();
         let text = extract_text(&path, size).unwrap();
         assert!(text.contains("Quarterly planning meeting"));
