@@ -10,6 +10,7 @@ usage() {
 [[ $# -eq 2 ]] || usage
 username="$1"
 binary_path="$2"
+ui_binary_path="$(dirname "$binary_path")/deep-search-ui"
 
 case "$username" in
   ""|*[!a-zA-Z0-9_.-]*) echo "Invalid macOS username." >&2; exit 2 ;;
@@ -39,6 +40,32 @@ mkdir -p "$db_dir" "$log_dir" /usr/local/bin /Library/LaunchDaemons
 chown -R "$username" "$home_dir/Library/Application Support/Deep-Search" "$log_dir"
 install -m 0755 "$binary_path" /usr/local/bin/deep-search
 install -m 0755 "$(dirname "${BASH_SOURCE[0]}")/deep-search-service.sh" /usr/local/bin/deep-search-service
+
+# When the desktop binary is included beside the engine, install a native
+# Applications bundle so users can launch Deep-Search like any macOS app.
+if [[ -f "$ui_binary_path" && -x "$ui_binary_path" ]]; then
+  app_bundle="/Applications/Deep-Search.app"
+  mkdir -p "$app_bundle/Contents/MacOS"
+  install -m 0755 "$ui_binary_path" "$app_bundle/Contents/MacOS/Deep-Search"
+  cat > "$app_bundle/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>Deep-Search</string>
+  <key>CFBundleIdentifier</key><string>com.deepsearch.desktop</string>
+  <key>CFBundleName</key><string>Deep-Search</string>
+  <key>CFBundleDisplayName</key><string>Deep-Search</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>0.1.0</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+PLIST
+  chmod 0644 "$app_bundle/Contents/Info.plist"
+fi
 
 plist="/Library/LaunchDaemons/com.deepsearch.service.plist"
 cat > "$plist" <<EOF
