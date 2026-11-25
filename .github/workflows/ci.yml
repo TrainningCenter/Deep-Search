@@ -24,6 +24,9 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Validate Linux service scripts
+        run: bash -n packaging/linux/systemd/install-service.sh packaging/linux/systemd/uninstall-service.sh
+
       - name: Build project
         run: cargo build --all-targets
 
