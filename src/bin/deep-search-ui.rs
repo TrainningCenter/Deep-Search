@@ -271,7 +271,8 @@ impl DeepSearchApp {
         for index in 0..column_count {
             ui.horizontal(|ui| {
                 let column = &mut columns[index];
-                changed |= ui.checkbox(&mut column.visible, column.key.as_str()).changed();
+                let label = column_label(&column.key, self.arabic);
+                changed |= ui.checkbox(&mut column.visible, label).changed();
                 ui.add(egui::DragValue::new(&mut column.width).range(60.0..=1200.0).speed(5.0).suffix(" px"));
                 if ui.small_button("↑").clicked() && index > 0 {
                     move_request = Some((index, -1));
@@ -326,7 +327,7 @@ impl DeepSearchApp {
         }
         table.header(28.0, |mut header| {
             for column in &columns {
-                header.col(|ui| { ui.strong(column.key.to_uppercase()); });
+                header.col(|ui| { ui.strong(column_label(&column.key, self.arabic)); });
             }
         }).body(|body| {
             body.rows(row_height, self.results.len(), |mut row| {
@@ -458,6 +459,28 @@ impl eframe::App for DeepSearchApp {
         });
 
         if self.busy { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
+    }
+}
+
+fn column_label(key: &str, arabic: bool) -> &'static str {
+    if arabic {
+        match key {
+            "name" => "الاسم",
+            "extension" => "الامتداد",
+            "size" => "الحجم",
+            "modified" => "تاريخ التعديل",
+            "path" => "المسار",
+            _ => "عمود",
+        }
+    } else {
+        match key {
+            "name" => "Name",
+            "extension" => "Extension",
+            "size" => "Size",
+            "modified" => "Modified",
+            "path" => "Path",
+            _ => "Column",
+        }
     }
 }
 
