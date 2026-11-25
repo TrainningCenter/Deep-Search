@@ -24,6 +24,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Linux desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgl1-mesa-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-cursor-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
+
       - name: Validate Linux service scripts
         run: bash -n packaging/linux/systemd/install-service.sh packaging/linux/systemd/uninstall-service.sh packaging/linux/systemd/deep-search-service.sh packaging/linux/systemd/test-service-control.sh
 
@@ -35,3 +40,6 @@ jobs:
 
       - name: Run tests
         run: cargo test --all-targets
+
+      - name: Check desktop application
+        run: cargo check --features desktop --bin deep-search-ui
