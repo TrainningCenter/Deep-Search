@@ -41,6 +41,34 @@ struct ViewProfile {
     frozen_columns: usize,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct SearchCondition {
+    field: String,
+    operator: String,
+    value: String,
+    #[serde(default = "default_enabled")]
+    enabled: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct SearchProfile {
+    conditions: Vec<SearchCondition>,
+    #[serde(default)]
+    join_with_or: bool,
+}
+
+fn default_search_profile() -> SearchProfile {
+    SearchProfile {
+        conditions: vec![SearchCondition {
+            field: "name".into(),
+            operator: "contains".into(),
+            value: String::new(),
+            enabled: true,
+        }],
+        join_with_or: false,
+    }
+}
+
 fn default_frozen_columns() -> usize { 1 }
 
 fn default_enabled() -> bool { true }
@@ -64,6 +92,10 @@ struct UiSettings {
     nas_roots: String,
     #[serde(default = "default_disabled")]
     notify_on_nas_state: bool,
+    #[serde(default)]
+    search_profiles: BTreeMap<String, SearchProfile>,
+    #[serde(default)]
+    active_search_profile: String,
 }
 
 impl Default for UiSettings {
@@ -78,6 +110,8 @@ impl Default for UiSettings {
             notify_on_service_state: false,
             nas_roots: String::new(),
             notify_on_nas_state: false,
+            search_profiles: BTreeMap::new(),
+            active_search_profile: String::new(),
         }
     }
 }
@@ -153,6 +187,14 @@ impl UiSettings {
             }
         }
         if migrated { settings.save(); }
+        if settings.search_profiles.is_empty() {
+            settings.search_profiles.insert("Default".into(), default_search_profile());
+            settings.active_search_profile = "Default".into();
+            settings.save();
+        }
+        if !settings.search_profiles.contains_key(&settings.active_search_profile) {
+            settings.active_search_profile = settings.search_profiles.keys().next().cloned().unwrap_or_default();
+        }
         if !settings.profiles.contains_key(&settings.active_profile) {
             settings.active_profile = settings.profiles.keys().next().cloned().unwrap_or_default();
         }
@@ -185,6 +227,7 @@ struct DeepSearchApp {
     receiver: Receiver<UiMessage>,
     settings: UiSettings,
     new_profile_name: String,
+    new_search_profile_name: String,
     arabic: bool,
     service_active: Option<bool>,
     service_enabled: Option<bool>,
@@ -225,6 +268,7 @@ impl Default for DeepSearchApp {
             receiver,
             settings,
             new_profile_name: String::new(),
+            new_search_profile_name: String::new(),
             arabic: false,
             service_active: None,
             service_enabled: None,
@@ -362,6 +406,156 @@ impl DeepSearchApp {
         self.settings.active_profile = name;
         self.new_profile_name.clear();
         self.persist_settings();
+    }
+
+    fn save_search_profile_as(&mut self) {
+        let name = self.new_search_profile_name.trim().to_owned();
+        if name.is_empty() { return; }
+        let current = self.settings.search_profiles
+            .get(&self.settings.active_search_profile)
+            .cloned()
+            .unwrap_or_else(default_search_profile);
+        self.settings.search_profiles.insert(name.clone(), current);
+        self.settings.active_search_profile = name;
+        self.new_search_profile_name.clear();
+        self.persist_settings();
+    }
+
+    fn render_search_builder(&mut self, ui: &mut egui::Ui) {
+        let names = self.settings.search_profiles.keys().cloned().collect::<Vec<_>>();
+        if names.is_empty() {
+            self.settings.search_profiles.insert("Default".into(), default_search_profile());
+            self.settings.active_search_profile = "Default".into();
+        }
+        let mut profile_name = self.settings.active_search_profile.clone();
+        let mut profile = self.settings.search_profiles.get(&profile_name)
+            .cloned().unwrap_or_else(default_search_profile);
+        let mut changed = false;
+        let mut apply = false;
+        let mut remove_at = None;
+        let mut move_request = None;
+
+        ui.collapsing(display_text(if self.arabic { "منشئ البحث المتقدم" } else { "Advanced Search Builder" }), |ui| {
+            ui.label(display_text(if self.arabic {
+                "أنشئ شروطًا متعددة، فعّل أو أخفِ كل شرط، ورتّبها واحفظ تخطيطات البحث."
+            } else {
+                "Build multi-condition searches, enable or hide individual conditions, reorder them, and save search layouts."
+            }));
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt("search_builder_profiles")
+                    .selected_text(display_text(&profile_name))
+                    .show_ui(ui, |ui| {
+                        for name in &names {
+                            if ui.selectable_label(*name == profile_name, display_text(name)).clicked() {
+                                profile_name = name.clone();
+                                profile = self.settings.search_profiles.get(name)
+                                    .cloned().unwrap_or_else(default_search_profile);
+                                changed = true;
+                            }
+                        }
+                    });
+                if ui.button(display_text(if self.arabic { "حفظ" } else { "Save" })).clicked() {
+                    self.settings.search_profiles.insert(profile_name.clone(), profile.clone());
+                    changed = true;
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label(display_text(if self.arabic { "ربط الشروط" } else { "Combine conditions" }));
+                egui::ComboBox::from_id_salt("search_builder_join")
+                    .selected_text(if profile.join_with_or { "OR" } else { "AND" })
+                    .show_ui(ui, |ui| {
+                        changed |= ui.selectable_value(&mut profile.join_with_or, false, "AND").changed();
+                        changed |= ui.selectable_value(&mut profile.join_with_or, true, "OR").changed();
+                    });
+            });
+            for index in 0..profile.conditions.len() {
+                let condition = &mut profile.conditions[index];
+                ui.horizontal_wrapped(|ui| {
+                    changed |= ui.checkbox(&mut condition.enabled, "").changed();
+                    egui::ComboBox::from_id_salt(("search_builder_field", index))
+                        .selected_text(&condition.field)
+                        .show_ui(ui, |ui| {
+                            for field in ["name", "path", "content", "extension", "type", "size"] {
+                                if ui.selectable_label(condition.field == field, field).clicked() {
+                                    condition.field = field.to_owned();
+                                    condition.operator = if field == "size" { "at least".into() } else if field == "extension" || field == "type" { "is".into() } else { "contains".into() };
+                                    changed = true;
+                                }
+                            }
+                        });
+                    let operators: &[&str] = if condition.field == "size" {
+                        &["at least", "at most"]
+                    } else if condition.field == "extension" || condition.field == "type" {
+                        &["is", "is not"]
+                    } else {
+                        &["contains"]
+                    };
+                    egui::ComboBox::from_id_salt(("search_builder_operator", index))
+                        .selected_text(&condition.operator)
+                        .show_ui(ui, |ui| {
+                            for operator in operators {
+                                if ui.selectable_label(condition.operator == *operator, *operator).clicked() {
+                                    condition.operator = (*operator).to_owned();
+                                    changed = true;
+                                }
+                            }
+                        });
+                    changed |= ui.add(egui::TextEdit::singleline(&mut condition.value)
+                        .desired_width(130.0)
+                        .hint_text(if condition.field == "size" { "e.g. 2GB" } else { "Value" })).changed();
+                    if ui.small_button("↑").clicked() && index > 0 { move_request = Some((index, index - 1)); }
+                    if ui.small_button("↓").clicked() && index + 1 < profile.conditions.len() { move_request = Some((index, index + 1)); }
+                    if ui.small_button("×").clicked() { remove_at = Some(index); }
+                });
+            }
+            ui.horizontal_wrapped(|ui| {
+                if ui.button(display_text(if self.arabic { "إضافة شرط" } else { "Add condition" })).clicked() {
+                    profile.conditions.push(SearchCondition {
+                        field: "name".into(), operator: "contains".into(), value: String::new(), enabled: true,
+                    });
+                    changed = true;
+                }
+                if ui.button(display_text(if self.arabic { "تطبيق البحث" } else { "Apply search" })).clicked() {
+                    apply = true;
+                }
+                ui.add(egui::TextEdit::singleline(&mut self.new_search_profile_name)
+                    .desired_width(120.0)
+                    .hint_text(display_text(if self.arabic { "اسم التخطيط" } else { "Layout name" })));
+                if ui.button(display_text(if self.arabic { "حفظ باسم" } else { "Save as" })).clicked() {
+                    self.settings.search_profiles.insert(profile_name.clone(), profile.clone());
+                    self.settings.active_search_profile = profile_name.clone();
+                    self.save_search_profile_as();
+                }
+            });
+            if let Some(query) = search_profile_query(&profile) {
+                ui.label(display_text(format!("Query: {query}")));
+            } else {
+                ui.label(display_text(if self.arabic { "أضف شرطًا مفعّلًا بقيمة." } else { "Add an enabled condition with a value to preview the query." }));
+            }
+        });
+
+        if let Some((from, to)) = move_request {
+            let item = profile.conditions.remove(from);
+            profile.conditions.insert(to, item);
+            changed = true;
+        }
+        if let Some(index) = remove_at {
+            if index < profile.conditions.len() {
+                profile.conditions.remove(index);
+                changed = true;
+            }
+        }
+        self.settings.search_profiles.insert(profile_name.clone(), profile.clone());
+        self.settings.active_search_profile = profile_name;
+        if changed { self.persist_settings(); }
+        if apply {
+            if let Some(query) = search_profile_query(&profile) {
+                self.search_query = query;
+                self.message = "Advanced search query applied. Press Search all results to run it.".to_owned();
+            } else {
+                self.message = "Add at least one enabled search condition with a value.".to_owned();
+            }
+        }
     }
 
     fn check_system_service(&mut self) {
@@ -1101,6 +1295,7 @@ impl eframe::App for DeepSearchApp {
             if ui.add_enabled(!self.busy, egui::Button::new(display_text(if self.arabic { "بحث في كل النتائج" } else { "Search all results" }))).clicked() {
                 self.search();
             }
+            self.render_search_builder(ui);
             ui.separator();
             if self.busy { ui.spinner(); }
             ui.label(display_text(&self.message));
@@ -1190,6 +1385,31 @@ impl eframe::App for DeepSearchApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }
     }
+}
+
+fn search_profile_query(profile: &SearchProfile) -> Option<String> {
+    let conditions = profile.conditions.iter()
+        .filter(|condition| condition.enabled && !condition.value.trim().is_empty())
+        .map(|condition| {
+            let value = condition.value.trim();
+            let safe_value = value.replace('"', "");
+            match (condition.field.as_str(), condition.operator.as_str()) {
+                ("name", _) => format!("name:\"{safe_value}\""),
+                ("path", _) => format!("path:\"{safe_value}\""),
+                ("content", _) => format!("content:\"{safe_value}\""),
+                ("extension", "is not") => format!("NOT ext:{}", safe_value.trim_start_matches('.')),
+                ("extension", _) => format!("ext:{}", safe_value.trim_start_matches('.')),
+                ("type", "is not") => format!("NOT type:{safe_value}"),
+                ("type", _) => format!("type:{safe_value}"),
+                ("size", "at most") => format!("size<={safe_value}"),
+                ("size", _) => format!("size>={safe_value}"),
+                _ => format!("name:\"{safe_value}\""),
+            }
+        })
+        .collect::<Vec<_>>();
+    if conditions.is_empty() { return None; }
+    let join = if profile.join_with_or { " OR " } else { " AND " };
+    Some(conditions.join(join))
 }
 
 fn result_column_text(result: &Value, key: &str) -> String {
