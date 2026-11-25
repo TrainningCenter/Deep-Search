@@ -1,5 +1,21 @@
 # Deep-Search
 
+# Download prebuilt alpha packages
+
+GitHub Actions builds precompiled desktop packages for Linux x86_64, Windows x64, and macOS Apple Silicon. Open the [Deep-Search Alpha Builds workflow](https://github.com/TrainningCenter/Deep-Search/actions/workflows/release.yml), select the latest **successful** run, and download the artifact for your platform:
+
+- Linux: `deep-search-linux-x64`
+- Windows: `deep-search-windows-x64`
+- macOS Apple Silicon: `deep-search-macos-arm64`
+
+For Linux, extract the downloaded archive, open a terminal in the extracted directory, and install the desktop application and background service with:
+
+```bash
+sudo bash packaging/linux/install.sh "$USER"
+```
+
+These are alpha builds. The workflow runs the automated tests before packaging; hardware-specific desktop behavior and physical Windows/macOS service behavior still require real-machine validation.
+
 # Desktop application (alpha)
 
 The first cross-platform desktop window is available behind the `desktop` feature. It connects to the background service at `127.0.0.1:4765`, lets you submit one or more indexing paths, and displays search matches in a resizable table. Search results are retrieved automatically across transport batches; the 1000-record service limit is not a cap on the total number of displayed matches.
