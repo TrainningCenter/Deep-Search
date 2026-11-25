@@ -54,6 +54,9 @@ jobs:
       - name: Build Docker service image
         run: docker build --tag deep-search:ci .
 
+      - name: Validate Docker Compose configuration
+        run: docker compose config --quiet
+
       - name: Smoke-test Docker service
         shell: bash
         run: |
