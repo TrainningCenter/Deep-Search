@@ -1335,7 +1335,9 @@ mod database_tests {
         let roots = vec![PathBuf::from("/data/videos"), PathBuf::from("/data/documents")];
         db.add_index_roots(&roots).unwrap();
         db.add_index_roots(&roots).unwrap();
-        assert_eq!(db.index_roots().unwrap(), roots);
+        let mut expected = roots;
+        expected.sort();
+        assert_eq!(db.index_roots().unwrap(), expected);
     }
 
     #[test]
