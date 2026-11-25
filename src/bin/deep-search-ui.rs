@@ -13,6 +13,8 @@ enum UiMessage {
     Indexed(Value),
     Search(CompleteSearch),
     Error(String),
+    ServiceState { active: Option<bool>, enabled: Option<bool>, detail: String },
+    ServiceAction { action: String, success: bool, detail: String },
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -115,6 +117,11 @@ struct DeepSearchApp {
     settings: UiSettings,
     new_profile_name: String,
     arabic: bool,
+    service_active: Option<bool>,
+    service_enabled: Option<bool>,
+    service_detail: String,
+    service_busy: bool,
+    service_checked: bool,
 }
 
 impl Default for DeepSearchApp {
@@ -137,6 +144,11 @@ impl Default for DeepSearchApp {
             settings,
             new_profile_name: String::new(),
             arabic: false,
+            service_active: None,
+            service_enabled: None,
+            service_detail: "Checking system service status…".to_owned(),
+            service_busy: false,
+            service_checked: false,
         }
     }
 }
@@ -175,6 +187,56 @@ impl DeepSearchApp {
         self.settings.active_profile = name;
         self.new_profile_name.clear();
         self.persist_settings();
+    }
+
+    fn check_system_service(&mut self) {
+        #[cfg(target_os = "linux")]
+        {
+            let sender = self.sender.clone();
+            let username = std::env::var("USER").unwrap_or_else(|_| "unknown".to_owned());
+            self.service_busy = true;
+            thread::spawn(move || {
+                let active = service_helper("is-active", &username, false);
+                let enabled = service_helper("is-enabled", &username, false);
+                let detail = match (&active, &enabled) {
+                    (Ok(a), Ok(e)) => format!("systemd · active: {a} · boot startup: {e}"),
+                    (Err(error), _) | (_, Err(error)) => error.clone(),
+                };
+                let _ = sender.send(UiMessage::ServiceState {
+                    active: active.ok().map(|value| value.trim() == "active"),
+                    enabled: enabled.ok().map(|value| value.trim() == "enabled"),
+                    detail,
+                });
+            });
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.service_detail = "Native service controls are not available on this platform yet.".to_owned();
+        }
+    }
+
+    fn control_system_service(&mut self, action: &str) {
+        #[cfg(target_os = "linux")]
+        {
+            let action = action.to_owned();
+            let sender = self.sender.clone();
+            let username = std::env::var("USER").unwrap_or_else(|_| "unknown".to_owned());
+            self.service_busy = true;
+            self.service_detail = format!("Requesting system service action: {action}…");
+            thread::spawn(move || {
+                let result = service_helper(&action, &username, true);
+                let (success, detail) = match result {
+                    Ok(output) => (true, output),
+                    Err(error) => (false, error),
+                };
+                let _ = sender.send(UiMessage::ServiceAction { action, success, detail });
+            });
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = action;
+            self.service_detail = "Native service controls are not available on this platform yet.".to_owned();
+        }
     }
 
     fn check_status(&mut self) {
@@ -257,6 +319,21 @@ impl DeepSearchApp {
                 }
                 UiMessage::Error(error) => {
                     self.message = format!("Error: {error}");
+                }
+                UiMessage::ServiceState { active, enabled, detail } => {
+                    self.service_active = active;
+                    self.service_enabled = enabled;
+                    self.service_detail = detail;
+                    self.service_busy = false;
+                }
+                UiMessage::ServiceAction { action, success, detail } => {
+                    self.service_detail = if success {
+                        format!("{action} completed: {detail}")
+                    } else {
+                        format!("{action} failed: {detail}")
+                    };
+                    self.service_busy = false;
+                    if success { self.check_system_service(); }
                 }
             }
         }
@@ -352,6 +429,10 @@ impl DeepSearchApp {
 impl eframe::App for DeepSearchApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.receive_messages();
+        if !self.service_checked {
+            self.service_checked = true;
+            self.check_system_service();
+        }
         let dropped_files = ctx.input(|input| input.raw.dropped_files.clone());
         for dropped in dropped_files {
             if let Some(path) = dropped.path {
@@ -413,6 +494,34 @@ impl eframe::App for DeepSearchApp {
                 self.index_roots();
             }
             ui.separator();
+            ui.collapsing(if self.arabic { "إدارة خدمة الخلفية" } else { "Background service" }, |ui| {
+                if let Some(active) = self.service_active {
+                    ui.label(format!("Runtime: {}", if active { "Running" } else { "Stopped" }));
+                }
+                if let Some(enabled) = self.service_enabled {
+                    let mut startup = enabled;
+                    if ui.checkbox(&mut startup, if self.arabic { "التشغيل تلقائيًا مع بدء النظام" } else { "Start automatically at boot" }).changed() {
+                        self.control_system_service(if startup { "enable" } else { "disable" });
+                    }
+                } else {
+                    ui.label(if self.arabic { "حالة بدء التشغيل غير معروفة" } else { "Boot startup state unavailable" });
+                }
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(!self.service_busy, egui::Button::new(if self.arabic { "تشغيل" } else { "Start" })).clicked() {
+                        self.control_system_service("start");
+                    }
+                    if ui.add_enabled(!self.service_busy, egui::Button::new(if self.arabic { "إيقاف" } else { "Stop" })).clicked() {
+                        self.control_system_service("stop");
+                    }
+                    if ui.add_enabled(!self.service_busy, egui::Button::new(if self.arabic { "تحديث" } else { "Refresh" })).clicked() {
+                        self.check_system_service();
+                    }
+                });
+                if self.service_busy { ui.spinner(); }
+                ui.label(&self.service_detail);
+                ui.small("Linux systemd only · authorization may be requested by the desktop");
+            });
+            ui.separator();
             ui.heading(if self.arabic { "بحث" } else { "Search" });
             ui.text_edit_singleline(&mut self.search_query);
             egui::ComboBox::from_label(if self.arabic { "ترتيب حسب" } else { "Sort by" })
@@ -462,6 +571,30 @@ fn result_column_text(result: &Value, key: &str) -> String {
             .map(format_modified).unwrap_or_else(|| "—".to_owned()),
         "size" => format_size(result.get("size_bytes").and_then(Value::as_u64).unwrap_or(0)),
         _ => "—".to_owned(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn service_helper(action: &str, username: &str, privileged: bool) -> Result<String, String> {
+    use std::process::Command;
+    let output = if privileged {
+        Command::new("pkexec")
+            .arg("/usr/local/bin/deep-search-service")
+            .arg(action)
+            .arg(username)
+            .output()
+    } else {
+        Command::new("deep-search-service")
+            .arg(action)
+            .arg(username)
+            .output()
+    }.map_err(|error| format!("Could not run service helper: {error}. Is the Linux systemd service installed?"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if output.status.success() {
+        Ok(if stdout.is_empty() { stderr } else { stdout })
+    } else {
+        Err(if stderr.is_empty() { stdout } else { stderr })
     }
 }
 
