@@ -54,6 +54,9 @@ jobs:
       - name: Build Docker service image
         run: docker build --tag deep-search:ci .
 
+      - name: Verify Docker media metadata probe
+        run: docker run --rm --entrypoint ffprobe deep-search:ci -version
+
       - name: Validate Docker Compose configuration
         run: docker compose config --quiet
 
