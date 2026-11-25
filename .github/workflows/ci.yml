@@ -125,6 +125,9 @@ jobs:
       - name: Check desktop application
         run: cargo check --features desktop --bin deep-search-ui
 
+      - name: Test desktop UI and Arabic shaping
+        run: cargo test --features desktop --bin deep-search-ui
+
       - name: Build desktop application for runtime smoke test
         run: cargo build --features desktop --bin deep-search-ui
 
