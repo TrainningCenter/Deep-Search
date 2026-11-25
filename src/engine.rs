@@ -2,7 +2,7 @@
 use crate::content::extract_text;
 use crate::database::{Database, SearchExpression, SearchResult, SearchSortDirection, SearchSortField};
 use crate::indexer::scan_paths_batched;
-use crate::media::extract_media_metadata;
+use crate::media::{extract_image_metadata, extract_media_metadata, is_supported_image_extension};
 use rusqlite::Result;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
@@ -145,7 +145,12 @@ impl SearchEngine {
             let extracted_batch: Vec<_> = changed_files.into_par_iter()
                 .map(|file| {
                     let content = extract_text(&file.path, file.size_bytes);
-                    let media = extract_media_metadata(&file.path, file.extension.as_deref());
+                    let media = if is_supported_image_extension(file.extension.as_deref()) {
+                        extract_image_metadata(&file.path, file.extension.as_deref())
+                            .or_else(|| extract_media_metadata(&file.path, file.extension.as_deref()))
+                    } else {
+                        extract_media_metadata(&file.path, file.extension.as_deref())
+                    };
                     (file, content, media)
                 })
                 .collect();
