@@ -20,25 +20,41 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
 pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
     let engine = SearchEngine::open(database_path)?;
     let initial_roots = engine.index_roots()?;
+    drop(engine);
+
     let index_lock = Arc::new(Mutex::new(()));
     let watcher_database_path = std::fs::canonicalize(database_path)
         .unwrap_or_else(|_| database_path.to_path_buf());
     let watch_roots = spawn_filesystem_watcher(
-        watcher_database_path,
+        watcher_database_path.clone(),
         initial_roots,
         Arc::clone(&index_lock),
     );
     let listener = TcpListener::bind(address)?;
     eprintln!("Deep-Search service listening on {address}");
 
+    // Each client gets its own SQLite connection. WAL allows readers to query
+    // while the indexing worker commits batches; writes remain serialized.
     for incoming in listener.incoming() {
         match incoming {
             Ok(stream) => {
-                if let Err(error) = handle_connection(
-                    stream, &engine, &watch_roots, &index_lock,
-                ) {
-                    eprintln!("Service request failed: {error}");
-                }
+                let database_path = watcher_database_path.clone();
+                let watch_roots = watch_roots.clone();
+                let index_lock = Arc::clone(&index_lock);
+                thread::spawn(move || {
+                    let engine = match SearchEngine::connect_existing(&database_path) {
+                        Ok(engine) => engine,
+                        Err(error) => {
+                            eprintln!("Could not open a client database connection: {error}");
+                            return;
+                        }
+                    };
+                    if let Err(error) = handle_connection(
+                        stream, &engine, &watch_roots, &index_lock,
+                    ) {
+                        eprintln!("Service request failed: {error}");
+                    }
+                });
             }
             Err(error) => eprintln!("Incoming connection failed: {error}"),
         }
