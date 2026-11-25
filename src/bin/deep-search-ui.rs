@@ -15,6 +15,7 @@ enum UiMessage {
     Error(String),
     ServiceState { active: Option<bool>, enabled: Option<bool>, detail: String },
     ServiceAction { action: String, success: bool, detail: String },
+    ServiceLogoutSetting { enabled: bool, success: bool, detail: String },
     PickedPaths(Vec<String>),
 }
 
@@ -147,6 +148,7 @@ struct DeepSearchApp {
     arabic: bool,
     service_active: Option<bool>,
     service_enabled: Option<bool>,
+    stop_on_logout: Option<bool>,
     service_detail: String,
     service_busy: bool,
     service_checked: bool,
@@ -176,6 +178,7 @@ impl Default for DeepSearchApp {
             arabic: false,
             service_active: None,
             service_enabled: None,
+            stop_on_logout: None,
             service_detail: "Checking system service status…".to_owned(),
             service_busy: false,
             service_checked: false,
@@ -286,6 +289,28 @@ impl DeepSearchApp {
         });
     }
 
+    fn set_stop_on_logout(&mut self, enabled: bool) {
+        let client = self.client();
+        let sender = self.sender.clone();
+        self.service_busy = true;
+        thread::spawn(move || {
+            let result = client.set_stop_on_logout(enabled);
+            let message = match result {
+                Ok(value) => UiMessage::ServiceLogoutSetting {
+                    enabled: value.get("stop_on_logout").and_then(Value::as_bool).unwrap_or(enabled),
+                    success: true,
+                    detail: "Logout preference saved.".to_owned(),
+                },
+                Err(error) => UiMessage::ServiceLogoutSetting {
+                    enabled,
+                    success: false,
+                    detail: error.to_string(),
+                },
+            };
+            let _ = sender.send(message);
+        });
+    }
+
     fn index_roots(&mut self) {
         let paths: Vec<String> = self.roots.lines()
             .map(str::trim).filter(|path| !path.is_empty())
@@ -333,6 +358,7 @@ impl DeepSearchApp {
             match message {
                 UiMessage::Status(status) => {
                     self.indexed_files = status.get("indexed_files").and_then(Value::as_u64);
+                    self.stop_on_logout = status.get("stop_on_logout").and_then(Value::as_bool);
                     self.message = format!(
                         "Service connected · version {}",
                         status.get("version").and_then(Value::as_str).unwrap_or("unknown")
@@ -369,6 +395,15 @@ impl DeepSearchApp {
                     };
                     self.service_busy = false;
                     if success { self.check_system_service(); }
+                }
+                UiMessage::ServiceLogoutSetting { enabled, success, detail } => {
+                    self.service_busy = false;
+                    if success {
+                        self.stop_on_logout = Some(enabled);
+                        self.service_detail = detail;
+                    } else {
+                        self.service_detail = format!("Could not update logout preference: {detail}");
+                    }
                 }
                 UiMessage::PickedPaths(paths) => {
                     for path in paths {
@@ -709,6 +744,24 @@ impl eframe::App for DeepSearchApp {
                     }
                 } else {
                     ui.label(if self.arabic { "حالة بدء التشغيل غير معروفة" } else { "Boot startup state unavailable" });
+                }
+                if let Some(current) = self.stop_on_logout {
+                    let mut stop_on_logout = current;
+                    if ui.add_enabled(
+                        !self.service_busy,
+                        egui::Checkbox::new(
+                            &mut stop_on_logout,
+                            if self.arabic { "إيقاف الخدمة عند تسجيل الخروج" } else { "Stop service when user logs out" },
+                        ),
+                    ).changed() {
+                        self.set_stop_on_logout(stop_on_logout);
+                    }
+                } else {
+                    ui.label(if self.arabic {
+                        "اتصل بالخدمة لضبط سلوك تسجيل الخروج"
+                    } else {
+                        "Connect to the service to configure logout behavior"
+                    });
                 }
                 ui.horizontal(|ui| {
                     if ui.add_enabled(!self.service_busy, egui::Button::new(if self.arabic { "تشغيل" } else { "Start" })).clicked() {
