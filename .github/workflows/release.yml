@@ -29,7 +29,7 @@ jobs:
             binary: deep-search.exe
             archive: zip
           - platform: macos-arm64
-            os: macos-14
+            os: macos-latest
             target: aarch64-apple-darwin
             binary: deep-search
             archive: tar.gz
