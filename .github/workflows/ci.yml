@@ -111,7 +111,7 @@ jobs:
 
           results = request({
               "command": "search",
-              "query": "docker",
+              "query": "content:docker",
               "limit": 10,
               "offset": 0,
               "sort": "name",
