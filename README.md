@@ -22,7 +22,7 @@ For development, run it with:
 cargo run --features desktop --bin deep-search-ui
 ```
 
-The desktop alpha currently provides automatic connection to the local service on launch, indexing-path entry (including drag-and-drop paths), query input, sorting, and a resizable results table. The results view supports showing/hiding columns, changing their order, adjusting their widths, row-height control, content-based auto-fit (sampling up to 500 loaded results), and persistent named view profiles. Default profiles include Default, Videos, Documents, Large files, and NAS. Profiles are stored locally in the user's application configuration directory. An Arabic-language toggle is available for the main controls and result table direction. On Linux with the systemd helper installed, the UI also exposes runtime start/stop and a boot-startup toggle using desktop authorization. Full Arabic RTL/font shaping, tray integration, graphical folder picking, frozen columns, and native Windows/macOS service controls remain in development.
+The desktop alpha currently provides automatic connection to the local service on launch, indexing-path entry (including drag-and-drop paths), query input, sorting, and a resizable results table. The results view supports showing/hiding columns, changing their order, adjusting their widths, row-height control, content-based auto-fit (sampling up to 500 loaded results), and persistent named view profiles. Default profiles include Default, Videos, Documents, Large files, and NAS. Profiles are stored locally in the user's application configuration directory. An Arabic-language toggle is available for the main controls and result table direction. On Linux with the systemd helper installed, the UI also exposes runtime start/stop and a boot-startup toggle using desktop authorization. Full Arabic RTL/font shaping, tray integration, graphical folder picking, frozen columns, and Windows/macOS service controls inside the desktop Settings UI remain in development. Separate macOS launchd and Windows startup-task installers are included in their platform packages.
 
 
 
@@ -186,6 +186,59 @@ sudo packaging/linux/systemd/uninstall-service.sh "$USER"
 ```
 
 The installer requires systemd, root privileges, an existing non-root Linux account, and a compiled executable. The service inherits that account's filesystem permissions; it can index only locations that account can read. The unit uses a restrictive umask and binds the engine to loopback by default. The Settings UI toggle for automatic startup, and equivalent Windows/macOS installers, are not implemented yet.
+
+### macOS background service (launchd)
+
+The macOS package includes a LaunchDaemon that starts before login, runs under the selected non-root account, and stays alive across logout. Install from the extracted package:
+
+```bash
+sudo bash packaging/macos/launchd/install-service.sh "$USER" ./deep-search
+```
+
+The installer also installs `deep-search-service` in `/usr/local/bin`. Check or control the service:
+
+```bash
+deep-search-service status
+deep-search-service is-active
+deep-search-service is-enabled
+sudo deep-search-service enable
+sudo deep-search-service disable
+deep-search-service start
+deep-search-service stop
+deep-search-service restart
+```
+
+Uninstall the LaunchDaemon without deleting the index database:
+
+```bash
+sudo bash packaging/macos/launchd/uninstall-service.sh
+```
+
+### Windows background service (Task Scheduler)
+
+The Windows package includes an elevated PowerShell installer. It registers a Task Scheduler task triggered at system startup, runs the engine under the selected account without requiring an interactive login, and restarts it after failure:
+
+```powershell
+.\packaging\windows\task-scheduler\install-service.ps1 -UserName $env:USERNAME -BinaryPath .\deep-search.exe
+```
+
+The task uses an S4U logon and does not store the user's password. This means it can index local files accessible to that account, but it cannot access authenticated network shares using the user's saved network credentials. Use a service account and a different authenticated deployment approach if network-share credentials are required.
+
+Manage the task from an elevated PowerShell session:
+
+```powershell
+& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" status
+& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" start
+& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" stop
+& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" enable
+& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" disable
+```
+
+Remove the scheduled task and installed binaries while preserving the index database:
+
+```powershell
+.\packaging\windows\task-scheduler\uninstall-service.ps1
+```
 
 ## Query language
 
