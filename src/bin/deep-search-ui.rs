@@ -193,62 +193,41 @@ impl DeepSearchApp {
     }
 
     fn check_system_service(&mut self) {
-        #[cfg(target_os = "linux")]
-        {
-            let sender = self.sender.clone();
-            let username = std::env::var("USER").unwrap_or_else(|_| "unknown".to_owned());
-            self.service_busy = true;
-            thread::spawn(move || {
-                let active = service_helper("is-active", &username, false);
-                let enabled = service_helper("is-enabled", &username, false);
-                let detail = match (&active, &enabled) {
-                    (Ok(a), Ok(e)) => format!("systemd · active: {a} · boot startup: {e}"),
-                    (Err(error), _) | (_, Err(error)) => error.clone(),
-                };
-                let _ = sender.send(UiMessage::ServiceState {
-                    active: active.ok().map(|value| value.trim() == "active"),
-                    enabled: enabled.ok().map(|value| value.trim() == "enabled"),
-                    detail,
-                });
+        let sender = self.sender.clone();
+        let username = std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "unknown".to_owned());
+        self.service_busy = true;
+        thread::spawn(move || {
+            let active = service_helper("is-active", &username, false);
+            let enabled = service_helper("is-enabled", &username, false);
+            let detail = match (&active, &enabled) {
+                (Ok(a), Ok(e)) => format!("service · active: {a} · boot startup: {e}"),
+                (Err(error), _) | (_, Err(error)) => error.clone(),
+            };
+            let _ = sender.send(UiMessage::ServiceState {
+                active: active.ok().map(|value| value.trim() == "active"),
+                enabled: enabled.ok().map(|value| value.trim() == "enabled"),
+                detail,
             });
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            self.service_detail = "Native service controls are not available on this platform yet.".to_owned();
-        }
+        });
     }
 
     fn control_system_service(&mut self, action: &str) {
-        #[cfg(target_os = "linux")]
-        {
-            let action = action.to_owned();
-            let sender = self.sender.clone();
-            let username = std::env::var("USER").unwrap_or_else(|_| "unknown".to_owned());
-            self.service_busy = true;
-            self.service_detail = format!("Requesting system service action: {action}…");
-            thread::spawn(move || {
-                let result = service_helper(&action, &username, true);
-                let (success, detail) = match result {
-                    Ok(output) => (true, output),
-                    Err(error) => (false, error),
-                };
-                let _ = sender.send(UiMessage::ServiceAction { action, success, detail });
-            });
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            let _ = action;
-            self.service_detail = "Native service controls are not available on this platform yet.".to_owned();
-        }
-    }
-
-    fn pick_folder(&mut self) {
+        let action = action.to_owned();
         let sender = self.sender.clone();
-        self.busy = true;
-        self.message = if self.arabic { "جارٍ فتح نافذة اختيار المجلد…" } else { "Opening folder picker…" }.to_owned();
+        let username = std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "unknown".to_owned());
+        self.service_busy = true;
+        self.service_detail = format!("Requesting system service action: {action}…");
         thread::spawn(move || {
-            let paths = native_folder_picker();
-            let _ = sender.send(UiMessage::PickedPaths(paths));
+            let result = service_helper(&action, &username, true);
+            let (success, detail) = match result {
+                Ok(output) => (true, output),
+                Err(error) => (false, error),
+            };
+            let _ = sender.send(UiMessage::ServiceAction { action, success, detail });
         });
     }
 
@@ -713,7 +692,63 @@ fn service_helper(action: &str, username: &str, privileged: bool) -> Result<Stri
     let expected_inactive = (action == "is-active" && stdout == "inactive")
         || (action == "is-enabled" && matches!(stdout.as_str(), "disabled" | "static" | "indirect" | "masked"));
     if output.status.success() || expected_inactive {
-        Ok(if stdout.is_empty() { stderr } else { stdout })
+        Ok(if stdout.is_empty() { if stderr.is_empty() { "OK".to_owned() } else { stderr } } else { stdout })
+    } else {
+        Err(if stderr.is_empty() { stdout } else { stderr })
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn service_helper(action: &str, _username: &str, privileged: bool) -> Result<String, String> {
+    use std::process::Command;
+    let helper = "/usr/local/bin/deep-search-service";
+    let output = if privileged {
+        let script = format!("do shell script \"{helper} {action}\" with administrator privileges");
+        Command::new("osascript").args(["-e", &script]).output()
+    } else {
+        Command::new(helper).arg(action).output()
+    }.map_err(|error| format!("Could not run the launchd service helper: {error}. Install the macOS service first."))?;
+    command_output_result(output)
+}
+
+#[cfg(target_os = "windows")]
+fn service_helper(action: &str, _username: &str, privileged: bool) -> Result<String, String> {
+    use std::process::Command;
+    let program_files = std::env::var_os("ProgramFiles")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
+    let helper = program_files.join("Deep-Search").join("deep-search-service.ps1");
+    if !helper.exists() {
+        return Err(format!("Windows service helper not found at {}. Install the startup task first.", helper.display()));
+    }
+    let output = if privileged {
+        let helper_text = helper.to_string_lossy().replace('\'', "''");
+        let argument_line = format!("-NoProfile -ExecutionPolicy Bypass -File \"{helper_text}\" -Action {action}");
+        let wrapper = format!(
+            "$p = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -ArgumentList '{}'; exit $p.ExitCode",
+            argument_line.replace('\'', "''")
+        );
+        Command::new("powershell.exe").args(["-NoProfile", "-Command", &wrapper]).output()
+    } else {
+        Command::new("powershell.exe")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&helper)
+            .args(["-Action", action])
+            .output()
+    }.map_err(|error| format!("Could not run the Windows service helper: {error}"))?;
+    command_output_result(output)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn service_helper(_action: &str, _username: &str, _privileged: bool) -> Result<String, String> {
+    Err("Native service controls are not supported on this platform.".to_owned())
+}
+
+fn command_output_result(output: std::process::Output) -> Result<String, String> {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if output.status.success() {
+        Ok(if stdout.is_empty() { if stderr.is_empty() { "OK".to_owned() } else { stderr } } else { stdout })
     } else {
         Err(if stderr.is_empty() { stdout } else { stderr })
     }
