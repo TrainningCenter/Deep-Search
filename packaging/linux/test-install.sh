@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+trap 'chmod -R u+rwX "$work" 2>/dev/null || true; rm -rf "$work"' EXIT
 package="$work/package"
 mkdir -p "$package/packaging/linux/systemd" "$work/mockbin" "$work/prefix"
 
