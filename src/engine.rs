@@ -2,6 +2,7 @@
 use crate::content::extract_text;
 use crate::database::{Database, SearchExpression, SearchResult, SearchSortDirection, SearchSortField};
 use crate::indexer::scan_paths_batched;
+use crate::media::extract_media_metadata;
 use rusqlite::Result;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
@@ -105,17 +106,30 @@ impl SearchEngine {
                 }
             }
 
-            let pending_batch: Vec<_> = changed_files.into_par_iter()
+            let extracted_batch: Vec<_> = changed_files.into_par_iter()
                 .map(|file| {
                     let content = extract_text(&file.path, file.size_bytes);
-                    (file, content)
+                    let media = extract_media_metadata(&file.path, file.extension.as_deref());
+                    (file, content, media)
                 })
                 .collect();
 
-            if !pending_batch.is_empty() {
-                let saved = pending_batch.len() as u64;
-                match self.database.replace_files_with_content_batch(&pending_batch) {
-                    Ok(()) => report.files_saved += saved,
+            if !extracted_batch.is_empty() {
+                let saved = extracted_batch.len() as u64;
+                let mut content_batch = Vec::with_capacity(extracted_batch.len());
+                let mut media_batch = Vec::with_capacity(extracted_batch.len());
+                for (file, content, media) in extracted_batch {
+                    media_batch.push((file.path.clone(), media));
+                    content_batch.push((file, content));
+                }
+                match self.database.replace_files_with_content_batch(&content_batch) {
+                    Ok(()) => match self.database.replace_media_metadata_batch(&media_batch) {
+                        Ok(()) => report.files_saved += saved,
+                        Err(_) => {
+                            report.errors += 1;
+                            indexing_failed = true;
+                        }
+                    },
                     Err(_) => {
                         report.errors += saved;
                         indexing_failed = true;
