@@ -33,6 +33,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    if command == "serve" {
+        let address = args.get(3).map(String::as_str).unwrap_or("127.0.0.1:4765");
+        deep_search::service::run(database_path, address)?;
+        return Ok(());
+    }
+
     let engine = SearchEngine::open(database_path)?;
 
     match command {
@@ -255,6 +261,8 @@ fn print_usage() {
     println!("Deep-Search");
     println!();
     println!("Commands:");
+    println!("  deep-search serve <database> [bind-address]");
+    println!("    Default bind address: 127.0.0.1:4765 (local machine only)");
     println!("  deep-search index <database> <folder>...");
     println!("  deep-search search <database> <name>");
     println!("  deep-search content <database> <text>");
