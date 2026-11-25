@@ -98,7 +98,7 @@ A fast, lightweight, cross-platform file indexing and search engine written in R
 - Search returns every matching file, with total-match counts and bounded batches for efficient transfer; pagination is an internal transport detail, not a cap on total results.
 - Deterministic sorting by relevance, name, path, extension, size, or modification time.
 - Extracts searchable text from common text files, PDF, RTF, DOCX, ODT, PPTX, and XLSX.
-- Extracts optional audio/video technical metadata through `ffprobe` when it is installed: duration, container, codecs, resolution, frame rate, bit rate, sample rate, and channel count. Media probing is best-effort and never blocks normal file indexing. Set `DEEP_SEARCH_FFPROBE` to an alternate executable path if needed.
+- Extracts optional audio/video technical metadata through `ffprobe`: duration, container, codecs, resolution, frame rate, bit rate, sample rate, and channel count. The Docker image includes FFmpeg/ffprobe; native desktop installs need `ffprobe` available on `PATH` or configured through `DEEP_SEARCH_FFPROBE`. Media probing is best-effort and never blocks normal file indexing.
 - Reconciles deleted files after a completed scan while preserving records when a scan fails or a source is unavailable.
 
 ## Build
