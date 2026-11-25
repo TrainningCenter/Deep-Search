@@ -482,4 +482,18 @@ mod tests {
         drop(engine);
         let _ = std::fs::remove_file(db_path);
     }
+    #[test]
+    fn filesystem_watcher_filters_non_content_events_and_database_sidecars() {
+        assert!(event_requires_reindex(&EventKind::Any));
+        assert!(!event_requires_reindex(&EventKind::Other));
+
+        let database = PathBuf::from("/tmp/deep-search-index.sqlite");
+        let wal_event = notify::Event::new(EventKind::Any)
+            .add_path(PathBuf::from("/tmp/deep-search-index.sqlite-wal"));
+        let user_file_event = notify::Event::new(EventKind::Any)
+            .add_path(PathBuf::from("/tmp/notes.txt"));
+        assert!(event_is_database_internal(&wal_event, &database));
+        assert!(!event_is_database_internal(&user_file_event, &database));
+    }
+
 }
