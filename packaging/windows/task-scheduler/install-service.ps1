@@ -3,7 +3,9 @@ param(
     [string]$UserName,
 
     [Parameter(Mandatory = $true)]
-    [string]$BinaryPath
+    [string]$BinaryPath,
+
+    [switch]$EnableAuthenticatedNetworkShares
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,11 +37,23 @@ if ($LASTEXITCODE -ne 0) {
 $arguments = 'serve "' + $databasePath + '" 127.0.0.1:4765'
 $taskAction = New-ScheduledTaskAction -Execute $installedBinary -Argument $arguments -WorkingDirectory $installDirectory
 $taskTrigger = New-ScheduledTaskTrigger -AtStartup
-$taskPrincipal = New-ScheduledTaskPrincipal -UserId $UserName -LogonType S4U -RunLevel Highest
 $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
-Register-ScheduledTask -TaskName "Deep-Search" -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings -Description "Deep-Search background indexing service" -Force | Out-Null
-Start-ScheduledTask -TaskName "Deep-Search"
+if ($EnableAuthenticatedNetworkShares) {
+    # Task Scheduler stores this credential using Windows-protected task credentials.
+    # Password logon allows the background task to authenticate to UNC network shares.
+    $credential = Get-Credential -UserName $UserName -Message "Enter the Windows account password for Deep-Search network-share access"
+    if ($null -eq $credential) {
+        throw "A Windows account credential is required when -EnableAuthenticatedNetworkShares is selected."
+    }
+    $password = $credential.GetNetworkCredential().Password
+    Register-ScheduledTask -TaskName "Deep-Search" -Action $taskAction -Trigger $taskTrigger -User $credential.UserName -Password $password -RunLevel Highest -Settings $taskSettings -Description "Deep-Search background indexing service" -Force | Out-Null
+    Write-Host "Authenticated network-share access is enabled for the Deep-Search startup task."
+} else {
+    $taskPrincipal = New-ScheduledTaskPrincipal -UserId $UserName -LogonType S4U -RunLevel Highest
+    Register-ScheduledTask -TaskName "Deep-Search" -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings -Description "Deep-Search background indexing service" -Force | Out-Null
+    Write-Warning "S4U mode does not store a password and cannot authenticate to protected network shares. Use -EnableAuthenticatedNetworkShares to configure password-backed task logon for UNC paths."
+}
 
+Start-ScheduledTask -TaskName "Deep-Search"
 Write-Host "Deep-Search is installed and scheduled to start at system boot for $UserName."
-Write-Warning "S4U scheduled tasks run without storing the user's password but cannot access authenticated network shares. Local and already-mounted storage can be indexed subject to account permissions."
