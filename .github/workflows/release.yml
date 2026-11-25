@@ -189,10 +189,6 @@ jobs:
             dist/Dockerfile
             dist/compose.yaml
             dist/Dockerfile
-            dist/compose.yaml
-            dist/Dockerfile
-            dist/Dockerfile
-            dist/compose.yaml
             dist/README.md
           if-no-files-found: error
 
@@ -203,6 +199,8 @@ jobs:
           files: |
             dist/deep-search-docker-linux-x64.tar
             dist/deep-search-docker-linux-x64.sha256
+            dist/compose.yaml
+            dist/Dockerfile
           generate_release_notes: true
           prerelease: true
           token: ${{ secrets.DEEP_SEARCH_RELEASE_TOKEN }}
