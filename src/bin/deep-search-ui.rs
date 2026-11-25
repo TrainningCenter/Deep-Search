@@ -393,10 +393,10 @@ impl DeepSearchApp {
         let sender = self.sender.clone();
         self.busy = true;
         self.message = if self.arabic {
-            "جارٍ فتح نافذة اختيار المجلد…"
+            display_text("جارٍ فتح نافذة اختيار المجلد…")
         } else {
-            "Opening folder picker…"
-        }.to_owned();
+            "Opening folder picker…".to_owned()
+        };
         thread::spawn(move || {
             let paths = native_folder_picker();
             let _ = sender.send(UiMessage::PickedPaths(paths));
@@ -751,8 +751,9 @@ impl DeepSearchApp {
 
     fn render_results(&mut self, ui: &mut egui::Ui) {
         ui.label(display_text(format!("{} result(s)", self.total)));
-        let columns = self.active_profile().columns.iter()
+        let mut columns = self.active_profile().columns.iter()
             .filter(|column| column.visible).cloned().collect::<Vec<_>>();
+        if self.arabic { columns.reverse(); }
         if columns.is_empty() {
             ui.centered_and_justified(|ui| ui.label(display_text("Show at least one column in Columns & layout.")));
             return;
@@ -925,7 +926,7 @@ impl eframe::App for DeepSearchApp {
                 let profiles = self.settings.profiles.keys().cloned().collect::<Vec<_>>();
                 let active = self.settings.active_profile.clone();
                 egui::ComboBox::from_id_salt("view_profiles")
-                    .selected_text(&active)
+                    .selected_text(display_text(&active))
                     .show_ui(ui, |ui| {
                         for profile in profiles {
                             if ui.selectable_label(profile == active, &profile).clicked() {
@@ -934,7 +935,7 @@ impl eframe::App for DeepSearchApp {
                         }
                     });
                 if ui.button("Save profile").clicked() { self.persist_settings(); }
-                ui.add(egui::TextEdit::singleline(&mut self.new_profile_name).hint_text("New profile name").desired_width(130.0));
+                ui.add(egui::TextEdit::singleline(&mut self.new_profile_name).hint_text(display_text("New profile name")).desired_width(130.0));
                 if ui.button("Save as").clicked() { self.save_profile_as(); }
                 if ui.button(display_text(if self.arabic { "English" } else { "العربية" })).clicked() {
                     self.arabic = !self.arabic;
@@ -957,7 +958,7 @@ impl eframe::App for DeepSearchApp {
                 |ui| {
             ui.heading(display_text(if self.arabic { "الخدمة" } else { "Service" }));
             ui.label(display_text(if self.arabic { "عنوان الخدمة" } else { "Address" }));
-            ui.text_edit_singleline(&mut self.service_address);
+            ui.with_layout(horizontal_layout(self.arabic), |ui| { ui.text_edit_singleline(&mut self.service_address); });
             if ui.button(display_text(if self.arabic { "اتصال / تحديث الحالة" } else { "Connect / Refresh status" })).clicked() {
                 self.check_status();
             }
@@ -967,7 +968,9 @@ impl eframe::App for DeepSearchApp {
             if ui.button(display_text(if self.arabic { "استعراض المجلدات…" } else { "Browse folders…" })).clicked() {
                 self.pick_folder();
             }
-            ui.add(egui::TextEdit::multiline(&mut self.roots).desired_rows(4).desired_width(f32::INFINITY));
+            ui.with_layout(horizontal_layout(self.arabic), |ui| {
+                ui.add(egui::TextEdit::multiline(&mut self.roots).desired_rows(4).desired_width(f32::INFINITY));
+            });
             if ui.add_enabled(!self.busy, egui::Button::new(display_text(if self.arabic { "ابدأ الفهرسة" } else { "Index locations" }))).clicked() {
                 self.index_roots();
             }
@@ -1038,7 +1041,7 @@ impl eframe::App for DeepSearchApp {
             });
             ui.separator();
             ui.heading(display_text(if self.arabic { "بحث" } else { "Search" }));
-            ui.text_edit_singleline(&mut self.search_query);
+            ui.with_layout(horizontal_layout(self.arabic), |ui| { ui.text_edit_singleline(&mut self.search_query); });
             egui::ComboBox::from_label(display_text(if self.arabic { "ترتيب حسب" } else { "Sort by" }))
                 .selected_text(&self.sort_field).show_ui(ui, |ui| {
                     for field in ["name", "path", "extension", "size", "modified", "relevance"] {
