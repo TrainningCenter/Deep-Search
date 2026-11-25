@@ -477,15 +477,15 @@ impl DeepSearchApp {
                     egui::ComboBox::from_id_salt(("search_builder_field", index))
                         .selected_text(&condition.field)
                         .show_ui(ui, |ui| {
-                            for field in ["name", "path", "content", "extension", "type", "size"] {
+                            for field in ["name", "path", "content", "extension", "type", "size", "duration"] {
                                 if ui.selectable_label(condition.field == field, field).clicked() {
                                     condition.field = field.to_owned();
-                                    condition.operator = if field == "size" { "at least".into() } else if field == "extension" || field == "type" { "is".into() } else { "contains".into() };
+                                    condition.operator = if field == "size" || field == "duration" { "at least".into() } else if field == "extension" || field == "type" { "is".into() } else { "contains".into() };
                                     changed = true;
                                 }
                             }
                         });
-                    let operators: &[&str] = if condition.field == "size" {
+                    let operators: &[&str] = if condition.field == "size" || condition.field == "duration" {
                         &["at least", "at most", "is"]
                     } else if condition.field == "extension" || condition.field == "type" {
                         &["is", "is not"]
@@ -504,7 +504,7 @@ impl DeepSearchApp {
                         });
                     changed |= ui.add(egui::TextEdit::singleline(&mut condition.value)
                         .desired_width(130.0)
-                        .hint_text(if condition.field == "size" { "e.g. 2GB" } else { "Value" })).changed();
+                        .hint_text(if condition.field == "size" { "e.g. 2GB" } else if condition.field == "duration" { "e.g. 90s, 2m, 1:30" } else { "Value" })).changed();
                     if ui.small_button("↑").clicked() && index > 0 { move_request = Some((index, index - 1)); }
                     if ui.small_button("↓").clicked() && index + 1 < condition_count { move_request = Some((index, index + 1)); }
                     if ui.small_button("×").clicked() { remove_at = Some(index); }
@@ -1409,6 +1409,9 @@ fn search_profile_query(profile: &SearchProfile) -> Option<String> {
                 ("size", "at most") => format!("size<={safe_value}"),
                 ("size", "is") => format!("size>={safe_value} AND size<={safe_value}"),
                 ("size", _) => format!("size>={safe_value}"),
+                ("duration", "at most") => format!("duration<={safe_value}"),
+                ("duration", "is") => format!("duration>={safe_value} AND duration<={safe_value}"),
+                ("duration", _) => format!("duration>={safe_value}"),
                 _ => format!("name:\"{safe_value}\""),
             }
         })
