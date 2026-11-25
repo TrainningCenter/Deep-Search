@@ -1941,6 +1941,23 @@ mod rtl_text_tests {
     }
 
     #[test]
+    fn advanced_search_builder_generates_exact_duration_ranges() {
+        let profile = SearchProfile {
+            conditions: vec![SearchCondition {
+                field: "duration".into(),
+                operator: "is".into(),
+                value: "1:30".into(),
+                enabled: true,
+            }],
+            join_with_or: false,
+        };
+        assert_eq!(
+            search_profile_query(&profile).as_deref(),
+            Some("duration>=1:30 AND duration<=1:30")
+        );
+    }
+
+    #[test]
     fn advanced_search_builder_returns_none_without_active_values() {
         let profile = SearchProfile {
             conditions: vec![
