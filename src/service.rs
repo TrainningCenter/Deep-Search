@@ -36,7 +36,7 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
 
     let (shutdown_sender, shutdown_receiver) = mpsc::channel();
     spawn_logout_monitor(watcher_database_path.clone(), shutdown_sender);
-    let mut client_threads = Vec::new();
+    let mut client_threads: Vec<thread::JoinHandle<()>> = Vec::new();
 
     // Each client gets its own SQLite connection. WAL allows readers to query
     // while the indexing worker commits batches; writes remain serialized.
