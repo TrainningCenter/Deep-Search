@@ -38,6 +38,9 @@ jobs:
 
       - name: Test Linux service control helper
         run: bash packaging/linux/systemd/test-service-control.sh
+
+      - name: Test Linux desktop installer
+        run: bash packaging/linux/test-install.sh
       
       - name: Test macOS launchd service control helper
         run: bash packaging/macos/launchd/test-service-control.sh
