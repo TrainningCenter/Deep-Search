@@ -110,7 +110,7 @@ For development, run it with:
 cargo run --features desktop --bin deep-search-ui
 ```
 
-The desktop alpha currently provides automatic connection to the local service on launch, indexing-path entry (native folder picker and drag-and-drop paths), query input, sorting, and a resizable results table. The results view supports adding/removing/showing/hiding columns, drag-and-drop or button-based reordering, adjusting each column's width, row-height control, content-based auto-fit (sampling up to 500 loaded results), and persistent named view profiles. Default profiles include Default, Videos, Audio, Documents, Large files, and NAS. The Videos and Audio profiles expose optional media columns such as duration, resolution, codecs, frame rate, bit rate, sample rate, and channels. Profiles are stored locally in the user's application configuration directory. An Arabic-language toggle, contextual letter shaping, Unicode bidirectional rendering for labels and result text, and mirrored table-column order are implemented. Text-edit cursor/selection behavior and full RTL interaction still need real-use validation. With the platform service helper installed, the UI exposes runtime start/stop and a boot-startup toggle on Linux, macOS, and Windows, using the platform's authorization prompt. It also offers **Stop service when user logs out**, disabled by default; when enabled, the background service waits for the account's first login session and exits cleanly after logout. If the OS cannot reliably report the session state, the service stays running rather than stopping unexpectedly. The UI disables this option and explains the limitation when session detection is unavailable. The system tray is enabled by default and provides Open, Pause/Resume Indexing, Start/Stop Engine, Settings, and Exit actions. Closing the main window hides it in the tray by default; both tray visibility and close-to-tray behavior are configurable in application settings. Desktop notifications are configurable independently: indexing-failure notifications are enabled by default, while completion and service start/stop notifications are disabled by default. NAS disconnect/reconnect monitoring is available from Application settings: add each mounted network-share path on a separate line, then optionally enable notifications. The desktop checks configured locations every 15 seconds. Linux detects network mounts from `/proc/self/mountinfo`, macOS checks mounted SMB/NFS/AFP/WebDAV volumes, and Windows monitors UNC paths and mapped network drive letters when visible to the running process. The initial check establishes the baseline without sending a notification. Frozen leading columns are supported by the current table. Platform service controls are wired to the Linux systemd, macOS launchd, and Windows Task Scheduler helpers; they still need runtime verification on physical macOS and Windows machines. The app loads an installed system Arabic font as a fallback when available. Separate macOS launchd and Windows startup-task installers are included in their platform packages.
+The desktop alpha currently provides automatic connection to the local service on launch, indexing-path entry (native folder picker and drag-and-drop paths), query input, sorting, and a resizable results table. The results view supports adding/removing/showing/hiding columns, drag-and-drop or button-based reordering, adjusting each column's width, row-height control, content-based auto-fit across **all loaded results**, and persistent named view profiles. Default profiles include Default, Videos, Audio, Documents, Large files, and NAS. The Videos and Audio profiles expose optional media columns such as duration, resolution, codecs, frame rate, bit rate, sample rate, and channels. Profiles are stored locally in the user's application configuration directory. An Arabic-language toggle, contextual letter shaping, Unicode bidirectional rendering for labels and result text, and mirrored table-column order are implemented. Text-edit cursor/selection behavior and full RTL interaction still need real-use validation. With the platform service helper installed, the UI exposes runtime start/stop and a boot-startup toggle on Linux, macOS, and Windows, using the platform's authorization prompt. It also offers **Stop service when user logs out**, disabled by default; when enabled, the background service waits for the account's first login session and exits cleanly after logout. If the OS cannot reliably report the session state, the service stays running rather than stopping unexpectedly. The UI disables this option and explains the limitation when session detection is unavailable. The system tray is enabled by default and provides Open, Pause/Resume Indexing, Start/Stop Engine, Settings, and Exit actions. Closing the main window hides it in the tray by default; both tray visibility and close-to-tray behavior are configurable in application settings. Desktop notifications are configurable independently: indexing-failure notifications are enabled by default, while completion and service start/stop notifications are disabled by default. NAS disconnect/reconnect monitoring is available from Application settings: add each mounted network-share path on a separate line, then optionally enable notifications. The desktop checks configured locations every 15 seconds. Linux detects network mounts from `/proc/self/mountinfo`, macOS checks mounted SMB/NFS/AFP/WebDAV volumes, and Windows monitors UNC paths and mapped network drive letters when visible to the running process. The initial check establishes the baseline without sending a notification. Frozen leading columns are supported by the current table. Platform service controls are wired to the Linux systemd, macOS launchd, and Windows Task Scheduler helpers; they still need runtime verification on physical macOS and Windows machines. The app loads an installed system Arabic font as a fallback when available. Separate macOS launchd and Windows startup-task installers are included in their platform packages.
 
 ## Current capabilities
 
@@ -251,7 +251,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 `search_all` automatically requests each batch, appends it to one collection, checks that the total remains consistent, and reports incomplete responses instead of silently dropping results.
 
-
 **Security and lifecycle:** the service is loopback-only by default and has no authentication, TLS, or remote client transport. Do not expose it to an untrusted network. The indexer can index local folders and already-mounted network shares; remote access to the service itself is not implemented. Boot-start installers are included for Linux systemd, macOS launchd, and Windows Task Scheduler. The system tray integration is implemented; physical runtime validation of tray behavior and the macOS/Windows service managers remains necessary on their respective operating systems.
 
 ### Linux system service (systemd)
@@ -329,7 +328,7 @@ sudo bash packaging/macos/launchd/uninstall-service.sh
 The Windows package includes an elevated PowerShell installer. It registers a Task Scheduler task triggered at system startup, runs the engine under the selected account without requiring an interactive login, and restarts it after failure. When `deep-search-ui.exe` is beside the engine binary, it also installs the desktop application and creates a Start Menu shortcut:
 
 ```powershell
-.\packaging\windows\task-scheduler\install-service.ps1 -UserName $env:USERNAME -BinaryPath .\deep-search.exe
+.\\packaging\\windows\\task-scheduler\\install-service.ps1 -UserName $env:USERNAME -BinaryPath .\\deep-search.exe
 ```
 
 By default, the task uses an S4U logon and does not store the user's password; this supports local storage but cannot authenticate to protected network shares. To allow access to authenticated NAS/SMB shares through UNC paths, run the installer with `-EnableAuthenticatedNetworkShares`. It will request the account password and let Windows Task Scheduler protect the stored task credential. Use this only when needed and ensure the selected account has the required share and filesystem permissions.
@@ -337,17 +336,17 @@ By default, the task uses an S4U logon and does not store the user's password; t
 Manage the task from an elevated PowerShell session:
 
 ```powershell
-& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" status
-& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" start
-& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" stop
-& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" enable
-& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" disable
+& "$env:ProgramFiles\\Deep-Search\\deep-search-service.ps1" status
+& "$env:ProgramFiles\\Deep-Search\\deep-search-service.ps1" start
+& "$env:ProgramFiles\\Deep-Search\\deep-search-service.ps1" stop
+& "$env:ProgramFiles\\Deep-Search\\deep-search-service.ps1" enable
+& "$env:ProgramFiles\\Deep-Search\\deep-search-service.ps1" disable
 ```
 
 Remove the scheduled task and installed binaries while preserving the index database:
 
 ```powershell
-.\packaging\windows\task-scheduler\uninstall-service.ps1
+.\\packaging\\windows\\task-scheduler\\uninstall-service.ps1
 ```
 
 ## Query language
@@ -366,6 +365,6 @@ Size units include `B`, `KB`/`KiB`, `MB`/`MiB`, `GB`/`GiB`, and `TB`/`TiB`. Bool
 
 ## Project direction
 
-The product separates the background indexing/search engine from its user interface and is intended to support Local, NAS, and Remote operating modes. The current repository contains the Rust engine, local JSON service, desktop interface, filesystem change watcher, and platform service managers for Linux systemd, macOS launchd, and Windows Task Scheduler. Remote service transport, tray integration, and full Arabic RTL behavior remain under development.
+The product separates the background indexing/search engine from its user interface and is intended to support Local, NAS, and Remote operating modes. The current repository contains the Rust engine, local JSON service, desktop interface, filesystem change watcher, and platform service managers for Linux systemd, macOS launchd, and Windows Task Scheduler. Secure remote service transport and full Arabic RTL behavior remain under development.
 
 Linux is the first-priority platform, followed by Windows and macOS.
