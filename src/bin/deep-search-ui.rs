@@ -15,6 +15,7 @@ enum UiMessage {
     Error(String),
     ServiceState { active: Option<bool>, enabled: Option<bool>, detail: String },
     ServiceAction { action: String, success: bool, detail: String },
+    PickedPaths(Vec<String>),
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -239,6 +240,16 @@ impl DeepSearchApp {
         }
     }
 
+    fn pick_folder(&mut self) {
+        let sender = self.sender.clone();
+        self.busy = true;
+        self.message = if self.arabic { "جارٍ فتح نافذة اختيار المجلد…" } else { "Opening folder picker…" }.to_owned();
+        thread::spawn(move || {
+            let paths = native_folder_picker();
+            let _ = sender.send(UiMessage::PickedPaths(paths));
+        });
+    }
+
     fn check_status(&mut self) {
         let client = self.client();
         let sender = self.sender.clone();
@@ -334,6 +345,21 @@ impl DeepSearchApp {
                     };
                     self.service_busy = false;
                     if success { self.check_system_service(); }
+                }
+                UiMessage::PickedPaths(paths) => {
+                    for path in paths {
+                        if !self.roots.lines().any(|existing| existing.trim() == path) {
+                            if !self.roots.is_empty() && !self.roots.ends_with('\n') {
+                                self.roots.push('\n');
+                            }
+                            self.roots.push_str(&path);
+                        }
+                    }
+                    self.message = if self.roots.is_empty() {
+                        "Folder selection cancelled.".to_owned()
+                    } else {
+                        "Folder path added to indexing locations.".to_owned()
+                    };
                 }
             }
         }
@@ -489,6 +515,9 @@ impl eframe::App for DeepSearchApp {
             ui.separator();
             ui.heading(if self.arabic { "مجلدات الفهرسة" } else { "Index locations" });
             ui.label(if self.arabic { "مسار مجلد في كل سطر:" } else { "One folder path per line:" });
+            if ui.button(if self.arabic { "استعراض المجلدات…" } else { "Browse folders…" }).clicked() {
+                self.pick_folder();
+            }
             ui.add(egui::TextEdit::multiline(&mut self.roots).desired_rows(4).desired_width(f32::INFINITY));
             if ui.add_enabled(!self.busy, egui::Button::new(if self.arabic { "ابدأ الفهرسة" } else { "Index locations" })).clicked() {
                 self.index_roots();
@@ -571,6 +600,57 @@ fn result_column_text(result: &Value, key: &str) -> String {
             .map(format_modified).unwrap_or_else(|| "—".to_owned()),
         "size" => format_size(result.get("size_bytes").and_then(Value::as_u64).unwrap_or(0)),
         _ => "—".to_owned(),
+    }
+}
+
+fn native_folder_picker() -> Vec<String> {
+    use std::process::Command;
+
+    #[cfg(target_os = "linux")]
+    {
+        match Command::new("zenity")
+            .args(["--file-selection", "--directory", "--multiple", "--separator=\n"])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                return String::from_utf8_lossy(&output.stdout).lines()
+                    .map(str::trim).filter(|path| !path.is_empty()).map(str::to_owned).collect();
+            }
+            Ok(_) => return Vec::new(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Vec::new(),
+        }
+        match Command::new("kdialog").arg("--getexistingdirectory").output() {
+            Ok(output) if output.status.success() => {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+                if path.is_empty() { Vec::new() } else { vec![path] }
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let script = "POSIX path of (choose folder with prompt \"Select a folder to index\")";
+        match Command::new("osascript").args(["-e", script]).output() {
+            Ok(output) if output.status.success() => {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+                if path.is_empty() { Vec::new() } else { vec![path] }
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let script = "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; if ($d.ShowDialog() -eq 'OK') { [Console]::WriteLine($d.SelectedPath) }";
+        match Command::new("powershell.exe").args(["-NoProfile", "-STA", "-Command", script]).output() {
+            Ok(output) if output.status.success() => {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+                if path.is_empty() { Vec::new() } else { vec![path] }
+            }
+            _ => Vec::new(),
+        }
     }
 }
 
