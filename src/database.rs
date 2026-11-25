@@ -738,7 +738,7 @@ impl Database {
         rows.collect()
     }
 
-    /// Return a bounded page of matching files    /// Return a bounded page of matching files while preserving relevance order.
+    /// Return a bounded page of matching files while preserving relevance order.
     /// Page sizes are clamped to 1..=1000 to protect the search service from
     /// accidentally loading an unbounded result set.
     pub fn search_page(
@@ -802,7 +802,7 @@ impl Database {
         rows.collect()
     }
 
-    /// Count all matches    /// Count all matches without loading their file records into memory.
+    /// Count all matches without loading their file records into memory.
     pub fn count_search_results(&self, expression: &SearchExpression) -> Result<u64> {
         let mut values = Vec::new();
         let condition = compile_expression(expression, &mut values);
@@ -815,7 +815,7 @@ impl Database {
         Ok(count.max(0) as u64)
     }
 
-    pub fn search_content(&self, term: &str)    pub fn search_content(&self, term: &str) -> Result<Vec<SearchResult>> {
+    pub fn search_content(&self, term: &str) -> Result<Vec<SearchResult>> {
         let term = term.trim();
         if term.is_empty() { return Ok(Vec::new()); }
         let source_sql = source_path_sql();
@@ -844,7 +844,7 @@ impl Database {
         }
     }
 
-    pub fn search_by_name(&self, term: &str)    pub fn search_by_name(&self, term: &str) -> Result<Vec<SearchResult>> {
+    pub fn search_by_name(&self, term: &str) -> Result<Vec<SearchResult>> {
         let term = term.trim();
         if term.is_empty() { return Ok(Vec::new()); }
         let escaped = term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
