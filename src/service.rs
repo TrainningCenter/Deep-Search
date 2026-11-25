@@ -32,7 +32,8 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
         Arc::clone(&index_lock),
         Arc::clone(&indexing_paused),
     );
-    let listener = bind_loopback_listener(address)?;
+    let container_mode = std::env::var("DEEP_SEARCH_CONTAINER_MODE").as_deref() == Ok("1");
+    let listener = bind_service_listener(address, container_mode)?;
     listener.set_nonblocking(true)?;
     eprintln!("Deep-Search service listening on {address}");
 
@@ -87,14 +88,17 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
 
 /// Bind the unauthenticated JSON-line service only to loopback interfaces.
 /// Remote access must use a separately authenticated and encrypted transport.
-fn bind_loopback_listener(address: &str) -> Result<TcpListener, Box<dyn Error>> {
+fn bind_service_listener(address: &str, allow_container_bridge: bool) -> Result<TcpListener, Box<dyn Error>> {
     let resolved = address.to_socket_addrs()?.collect::<Vec<_>>();
     if resolved.is_empty() {
         return Err("Service bind address did not resolve to any socket addresses".into());
     }
-    if resolved.iter().any(|socket| !socket.ip().is_loopback()) {
+    if resolved.iter().any(|socket| {
+        !socket.ip().is_loopback()
+            && !(allow_container_bridge && socket.ip().is_unspecified())
+    }) {
         return Err(
-            "Refusing to expose the unauthenticated service on a non-loopback interface; remote access requires secured transport".into(),
+            "Refusing to expose the unauthenticated service outside loopback; container bridge binding requires DEEP_SEARCH_CONTAINER_MODE=1 and a loopback-only host port".into(),
         );
     }
     Ok(TcpListener::bind(address)?)
@@ -616,15 +620,22 @@ mod tests {
     #[test]
     fn service_bind_rejects_non_loopback_interfaces() {
         for address in ["0.0.0.0:4765", "[::]:4765", "192.0.2.10:4765"] {
-            let error = bind_loopback_listener(address).unwrap_err();
+            let error = bind_service_listener(address, false).unwrap_err();
             assert!(error.to_string().contains("non-loopback interface"));
         }
     }
 
     #[test]
     fn service_bind_accepts_ipv4_loopback() {
-        let listener = bind_loopback_listener("127.0.0.1:0").unwrap();
+        let listener = bind_service_listener("127.0.0.1:0", false).unwrap();
         assert!(listener.local_addr().unwrap().ip().is_loopback());
+    }
+
+    #[test]
+    fn service_bind_allows_container_bridge_only_in_explicit_mode() {
+        let listener = bind_service_listener("0.0.0.0:0", true).unwrap();
+        assert!(listener.local_addr().unwrap().ip().is_unspecified());
+        assert!(bind_service_listener("0.0.0.0:0", false).is_err());
     }
 
     #[test]
