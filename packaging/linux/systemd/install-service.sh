@@ -35,6 +35,7 @@ getent passwd "$username" >/dev/null || {
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 install -D -m 0755 "$binary_path" /usr/local/bin/deep-search
 install -D -m 0644 "$script_dir/deep-search@.service" /etc/systemd/system/deep-search@.service
+install -D -m 0755 "$script_dir/deep-search-service.sh" /usr/local/bin/deep-search-service
 
 systemctl daemon-reload
 systemctl enable --now "deep-search@${username}.service"
