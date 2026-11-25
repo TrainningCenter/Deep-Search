@@ -72,6 +72,10 @@ jobs:
               throw ($errors | Out-String)
             }
           }
+          Import-Module ScheduledTasks
+          $null = New-ScheduledTaskTrigger -AtStartup
+          $null = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Highest
+          $null = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
       - name: Run tests
         run: cargo test --all-targets
