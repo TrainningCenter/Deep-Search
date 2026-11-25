@@ -432,6 +432,7 @@ impl DeepSearchApp {
             .cloned().unwrap_or_else(default_search_profile);
         let mut changed = false;
         let mut apply = false;
+        let mut save_as = false;
         let mut remove_at = None;
         let mut move_request = None;
 
@@ -468,7 +469,8 @@ impl DeepSearchApp {
                         changed |= ui.selectable_value(&mut profile.join_with_or, true, "OR").changed();
                     });
             });
-            for index in 0..profile.conditions.len() {
+            let condition_count = profile.conditions.len();
+            for index in 0..condition_count {
                 let condition = &mut profile.conditions[index];
                 ui.horizontal_wrapped(|ui| {
                     changed |= ui.checkbox(&mut condition.enabled, "").changed();
@@ -484,7 +486,7 @@ impl DeepSearchApp {
                             }
                         });
                     let operators: &[&str] = if condition.field == "size" {
-                        &["at least", "at most"]
+                        &["at least", "at most", "is"]
                     } else if condition.field == "extension" || condition.field == "type" {
                         &["is", "is not"]
                     } else {
@@ -504,7 +506,7 @@ impl DeepSearchApp {
                         .desired_width(130.0)
                         .hint_text(if condition.field == "size" { "e.g. 2GB" } else { "Value" })).changed();
                     if ui.small_button("↑").clicked() && index > 0 { move_request = Some((index, index - 1)); }
-                    if ui.small_button("↓").clicked() && index + 1 < profile.conditions.len() { move_request = Some((index, index + 1)); }
+                    if ui.small_button("↓").clicked() && index + 1 < condition_count { move_request = Some((index, index + 1)); }
                     if ui.small_button("×").clicked() { remove_at = Some(index); }
                 });
             }
@@ -523,8 +525,7 @@ impl DeepSearchApp {
                     .hint_text(display_text(if self.arabic { "اسم التخطيط" } else { "Layout name" })));
                 if ui.button(display_text(if self.arabic { "حفظ باسم" } else { "Save as" })).clicked() {
                     self.settings.search_profiles.insert(profile_name.clone(), profile.clone());
-                    self.settings.active_search_profile = profile_name.clone();
-                    self.save_search_profile_as();
+                    save_as = true;
                 }
             });
             if let Some(query) = search_profile_query(&profile) {
@@ -547,7 +548,11 @@ impl DeepSearchApp {
         }
         self.settings.search_profiles.insert(profile_name.clone(), profile.clone());
         self.settings.active_search_profile = profile_name;
-        if changed { self.persist_settings(); }
+        if save_as {
+            self.save_search_profile_as();
+        } else if changed {
+            self.persist_settings();
+        }
         if apply {
             if let Some(query) = search_profile_query(&profile) {
                 self.search_query = query;
@@ -1402,6 +1407,7 @@ fn search_profile_query(profile: &SearchProfile) -> Option<String> {
                 ("type", "is not") => format!("NOT type:{safe_value}"),
                 ("type", _) => format!("type:{safe_value}"),
                 ("size", "at most") => format!("size<={safe_value}"),
+                ("size", "is") => format!("size>={safe_value} AND size<={safe_value}"),
                 ("size", _) => format!("size>={safe_value}"),
                 _ => format!("name:\"{safe_value}\""),
             }
