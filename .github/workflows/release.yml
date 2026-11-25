@@ -187,8 +187,6 @@ jobs:
             dist/deep-search-docker-linux-x64.sha256
             dist/compose.yaml
             dist/Dockerfile
-            dist/compose.yaml
-            dist/Dockerfile
             dist/README.md
           if-no-files-found: error
 
@@ -265,3 +263,5 @@ jobs:
             dist/deep-search-macos-arm64.sha256
             dist/deep-search-docker-linux-x64.tar
             dist/deep-search-docker-linux-x64.sha256
+            dist/compose.yaml
+            dist/Dockerfile
