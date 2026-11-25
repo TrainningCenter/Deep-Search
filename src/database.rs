@@ -1,9 +1,10 @@
 
 use crate::{FileRecord, IndexingStatus};
 use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension, Result};
+use serde::Serialize;
 use std::path::Path;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SearchResult {
     pub path: std::path::PathBuf,
     pub name: String,
