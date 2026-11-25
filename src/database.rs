@@ -62,6 +62,11 @@ pub enum SearchExpression {
     SourceContains(String),
     DurationAtLeast(u64),
     DurationAtMost(u64),
+    ResolutionAtLeast { min_width: Option<u32>, min_height: Option<u32> },
+    ResolutionAtMost { max_width: Option<u32>, max_height: Option<u32> },
+    ResolutionEquals { width: u32, height: u32 },
+    FpsAtLeast(u32),
+    FpsAtMost(u32),
     And(Vec<SearchExpression>),
     Or(Vec<SearchExpression>),
     Not(Box<SearchExpression>),
@@ -186,6 +191,44 @@ fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) ->
         SearchExpression::DurationAtMost(duration) => {
             values.push(Value::Integer((*duration).min(i64::MAX as u64) as i64));
             format!("EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.file_path = files.path AND CAST(json_extract(mm.metadata_json, '$.duration_ms') AS INTEGER) <= ?{})", values.len())
+        }
+        SearchExpression::ResolutionAtLeast { min_width, min_height } => {
+            let mut conditions = Vec::new();
+            if let Some(width) = min_width {
+                values.push(Value::Integer(*width as i64));
+                conditions.push(format!("CAST(json_extract(mm.metadata_json, '$.width') AS INTEGER) >= ?{}", values.len()));
+            }
+            if let Some(height) = min_height {
+                values.push(Value::Integer(*height as i64));
+                conditions.push(format!("CAST(json_extract(mm.metadata_json, '$.height') AS INTEGER) >= ?{}", values.len()));
+            }
+            format!("EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.file_path = files.path AND {})", conditions.join(" AND "))
+        }
+        SearchExpression::ResolutionAtMost { max_width, max_height } => {
+            let mut conditions = Vec::new();
+            if let Some(width) = max_width {
+                values.push(Value::Integer(*width as i64));
+                conditions.push(format!("CAST(json_extract(mm.metadata_json, '$.width') AS INTEGER) <= ?{}", values.len()));
+            }
+            if let Some(height) = max_height {
+                values.push(Value::Integer(*height as i64));
+                conditions.push(format!("CAST(json_extract(mm.metadata_json, '$.height') AS INTEGER) <= ?{}", values.len()));
+            }
+            format!("EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.file_path = files.path AND {})", conditions.join(" AND "))
+        }
+        SearchExpression::ResolutionEquals { width, height } => {
+            values.push(Value::Integer(*width as i64));
+            let width_index = values.len();
+            values.push(Value::Integer(*height as i64));
+            format!("EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.file_path = files.path AND CAST(json_extract(mm.metadata_json, '$.width') AS INTEGER) = ?{width_index} AND CAST(json_extract(mm.metadata_json, '$.height') AS INTEGER) = ?{})", values.len())
+        }
+        SearchExpression::FpsAtLeast(fps_milli) => {
+            values.push(Value::Integer(*fps_milli as i64));
+            format!("EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.file_path = files.path AND CAST(json_extract(mm.metadata_json, '$.frame_rate_milli') AS INTEGER) >= ?{})", values.len())
+        }
+        SearchExpression::FpsAtMost(fps_milli) => {
+            values.push(Value::Integer(*fps_milli as i64));
+            format!("EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.file_path = files.path AND CAST(json_extract(mm.metadata_json, '$.frame_rate_milli') AS INTEGER) <= ?{})", values.len())
         }
         SearchExpression::And(expressions) => {
             if expressions.is_empty() { return "1 = 1".to_string(); }
@@ -916,6 +959,27 @@ mod database_tests {
             modified_timestamp_ns: Some(1_700_000_000),
             status: IndexingStatus::Pending,
         }
+    }
+
+    #[test]
+    fn filters_media_by_resolution_and_frame_rate() {
+        use crate::media::MediaMetadata;
+        let db = Database::open(":memory:").unwrap();
+        let uhd = sample_file("uhd.mp4", 100);
+        let hd = sample_file("hd.mp4", 200);
+        db.upsert_file(&uhd).unwrap();
+        db.upsert_file(&hd).unwrap();
+        db.replace_media_metadata_batch(&[
+            (uhd.path.clone(), Some(MediaMetadata { width: Some(3840), height: Some(2160), frame_rate_milli: Some(60_000), ..Default::default() })),
+            (hd.path.clone(), Some(MediaMetadata { width: Some(1920), height: Some(1080), frame_rate_milli: Some(29_970), ..Default::default() })),
+        ]).unwrap();
+
+        let four_k = db.search(&SearchExpression::ResolutionAtLeast { min_width: Some(3840), min_height: None }).unwrap();
+        assert_eq!(four_k.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(), vec!["uhd.mp4"]);
+        let high_frame_rate = db.search(&SearchExpression::FpsAtLeast(60_000)).unwrap();
+        assert_eq!(high_frame_rate.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(), vec!["uhd.mp4"]);
+        let at_most_1080 = db.search(&SearchExpression::ResolutionAtMost { max_width: None, max_height: Some(1080) }).unwrap();
+        assert_eq!(at_most_1080.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(), vec!["hd.mp4"]);
     }
 
     #[test]

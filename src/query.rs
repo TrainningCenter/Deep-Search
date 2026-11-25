@@ -123,7 +123,44 @@ fn parse_condition(token: &str) -> Result<SearchExpression, String> {
     if lower.starts_with("size<=") { return Ok(SearchExpression::SizeAtMost(parse_size(&token[6..])?)); }
     if lower.starts_with("duration>=") { return Ok(SearchExpression::DurationAtLeast(parse_duration(&token[10..])?)); }
     if lower.starts_with("duration<=") { return Ok(SearchExpression::DurationAtMost(parse_duration(&token[10..])?)); }
-    if token.contains(':') || lower.starts_with("size>") || lower.starts_with("size<") || lower.starts_with("duration>") || lower.starts_with("duration<") {
+    if lower.starts_with("resolution>=") {
+        let (width, height) = parse_resolution_threshold(&token[12..])?;
+        return Ok(SearchExpression::ResolutionAtLeast { min_width: width, min_height: height });
+    }
+    if lower.starts_with("resolution<=") {
+        let (width, height) = parse_resolution_threshold(&token[12..])?;
+        return Ok(SearchExpression::ResolutionAtMost { max_width: width, max_height: height });
+    }
+    if lower.starts_with("resolution:") {
+        let value = &token[11..];
+        if let Some((width, height)) = value.split_once('x') {
+            let width = parse_resolution_dimension(width)?;
+            let height = parse_resolution_dimension(height)?;
+            return Ok(SearchExpression::ResolutionEquals { width, height });
+        }
+        let (width, height) = parse_resolution_threshold(value)?;
+        return Ok(SearchExpression::ResolutionAtLeast { min_width: width, min_height: height });
+    }
+    if lower.starts_with("fps:>=") {
+        return Ok(SearchExpression::FpsAtLeast(parse_fps(&token[6..])?));
+    }
+    if lower.starts_with("fps:<=") {
+        return Ok(SearchExpression::FpsAtMost(parse_fps(&token[6..])?));
+    }
+    if lower.starts_with("fps>=") {
+        return Ok(SearchExpression::FpsAtLeast(parse_fps(&token[5..])?));
+    }
+    if lower.starts_with("fps<=") {
+        return Ok(SearchExpression::FpsAtMost(parse_fps(&token[5..])?));
+    }
+    if lower.starts_with("fps:") {
+        let fps = parse_fps(&token[4..])?;
+        return Ok(SearchExpression::And(vec![
+            SearchExpression::FpsAtLeast(fps),
+            SearchExpression::FpsAtMost(fps),
+        ]));
+    }
+    if token.contains(':') || lower.starts_with("size>") || lower.starts_with("size<") || lower.starts_with("duration>") || lower.starts_with("duration<") || lower.starts_with("resolution>") || lower.starts_with("resolution<") || lower.starts_with("fps>") || lower.starts_with("fps<") {
         return Err(format!("Unknown condition '{token}'. Use name:, path:, content:, ext:, type:, size>=, size<=, duration>= or duration<="));
     }
     Ok(SearchExpression::Or(vec![
@@ -131,6 +168,42 @@ fn parse_condition(token: &str) -> Result<SearchExpression, String> {
         SearchExpression::PathContains(token.to_string()),
         SearchExpression::ContentContains(token.to_string()),
     ]))
+}
+
+fn parse_resolution_dimension(value: &str) -> Result<u32, String> {
+    let dimension = value.trim().parse::<u32>()
+        .map_err(|_| format!("Invalid resolution dimension: {value}"))?;
+    if dimension == 0 { return Err("Resolution dimensions must be greater than zero".into()); }
+    Ok(dimension)
+}
+
+fn parse_resolution_threshold(value: &str) -> Result<(Option<u32>, Option<u32>), String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    let threshold = match normalized.as_str() {
+        "8k" => (Some(7680), None),
+        "4k" | "uhd" => (Some(3840), None),
+        "2160p" => (None, Some(2160)),
+        "1440p" | "2k" => (None, Some(1440)),
+        "1080p" | "fullhd" | "fhd" => (None, Some(1080)),
+        "720p" | "hd" => (None, Some(720)),
+        "480p" => (None, Some(480)),
+        _ => {
+            let width = parse_resolution_dimension(&normalized)?;
+            (Some(width), None)
+        }
+    };
+    Ok(threshold)
+}
+
+fn parse_fps(value: &str) -> Result<u32, String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    let normalized = normalized.strip_suffix("fps").unwrap_or(&normalized).trim();
+    let fps = normalized.parse::<f64>()
+        .map_err(|_| format!("Invalid frame rate: {value}"))?;
+    if !fps.is_finite() || fps <= 0.0 || fps > 1000.0 {
+        return Err(format!("Invalid frame rate: {value}"));
+    }
+    Ok((fps * 1000.0).round() as u32)
 }
 
 fn parse_duration(value: &str) -> Result<u64, String> {
@@ -201,6 +274,35 @@ fn parse_size(value: &str) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_resolution_and_frame_rate_filters() {
+        assert_eq!(
+            parse_query("resolution:4K").unwrap(),
+            SearchExpression::ResolutionAtLeast { min_width: Some(3840), min_height: None }
+        );
+        assert_eq!(
+            parse_query("resolution:1920x1080").unwrap(),
+            SearchExpression::ResolutionEquals { width: 1920, height: 1080 }
+        );
+        assert_eq!(
+            parse_query("resolution<=1080p").unwrap(),
+            SearchExpression::ResolutionAtMost { max_width: None, max_height: Some(1080) }
+        );
+        assert_eq!(parse_query("fps:>=60").unwrap(), SearchExpression::FpsAtLeast(60_000));
+        assert_eq!(parse_query("fps:<=29.97").unwrap(), SearchExpression::FpsAtMost(29_970));
+        assert_eq!(
+            parse_query("fps:60").unwrap(),
+            SearchExpression::And(vec![SearchExpression::FpsAtLeast(60_000), SearchExpression::FpsAtMost(60_000)])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_resolution_and_frame_rate_filters() {
+        assert!(parse_query("resolution:0x1080").is_err());
+        assert!(parse_query("fps:0").is_err());
+        assert!(parse_query("fps:1001").is_err());
+    }
 
     #[test]
     fn parses_source_filter() {

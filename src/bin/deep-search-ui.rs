@@ -494,15 +494,15 @@ impl DeepSearchApp {
                     egui::ComboBox::from_id_salt(("search_builder_field", index))
                         .selected_text(&condition.field)
                         .show_ui(ui, |ui| {
-                            for field in ["name", "path", "source", "content", "extension", "type", "size", "duration"] {
+                            for field in ["name", "path", "source", "content", "extension", "type", "size", "duration", "resolution", "fps"] {
                                 if ui.selectable_label(condition.field == field, field).clicked() {
                                     condition.field = field.to_owned();
-                                    condition.operator = if field == "size" || field == "duration" { "at least".into() } else if field == "extension" || field == "type" { "is".into() } else { "contains".into() };
+                                    condition.operator = if field == "size" || field == "duration" || field == "resolution" || field == "fps" { "at least".into() } else if field == "extension" || field == "type" { "is".into() } else { "contains".into() };
                                     changed = true;
                                 }
                             }
                         });
-                    let operators: &[&str] = if condition.field == "size" || condition.field == "duration" {
+                    let operators: &[&str] = if condition.field == "size" || condition.field == "duration" || condition.field == "resolution" || condition.field == "fps" {
                         &["at least", "at most", "is"]
                     } else if condition.field == "extension" || condition.field == "type" {
                         &["is", "is not"]
@@ -521,14 +521,20 @@ impl DeepSearchApp {
                         });
                     changed |= ui.add(egui::TextEdit::singleline(&mut condition.value)
                         .desired_width(130.0)
-                        .hint_text(if condition.field == "size" { "e.g. 2GB" } else if condition.field == "duration" { "e.g. 90s, 2m, 1:30" } else { "Value" })).changed();
-                    if condition.field == "duration" {
-                        egui::ComboBox::from_id_salt(("duration_presets", index))
+                        .hint_text(if condition.field == "size" { "e.g. 2GB" } else if condition.field == "duration" { "e.g. 90s, 2m, 1:30" } else if condition.field == "resolution" { "e.g. 4K, 1080p, 1920x1080" } else if condition.field == "fps" { "e.g. 60 or 59.94" } else { "Value" })).changed();
+                    if ["duration", "resolution", "fps"].contains(&condition.field.as_str()) {
+                        egui::ComboBox::from_id_salt(("filter_presets", index))
                             .selected_text("Presets")
                             .show_ui(ui, |ui| {
-                                for preset in ["30s", "1m", "5m", "10m", "15m", "30m", "45m", "1h", "2h", "4h", "8h"] {
-                                    if ui.selectable_label(condition.value == preset, preset).clicked() {
-                                        condition.value = preset.to_owned();
+                                let presets: &[&str] = match condition.field.as_str() {
+                                    "duration" => &["30s", "1m", "5m", "10m", "15m", "30m", "45m", "1h", "2h", "4h", "8h"],
+                                    "resolution" => &["480p", "720p", "1080p", "1440p", "2160p", "4K", "8K"],
+                                    "fps" => &["23.976", "24", "25", "30", "50", "59.94", "60", "120", "144"],
+                                    _ => &[],
+                                };
+                                for preset in presets {
+                                    if ui.selectable_label(condition.value == *preset, *preset).clicked() {
+                                        condition.value = (*preset).to_owned();
                                         changed = true;
                                     }
                                 }
@@ -1484,6 +1490,12 @@ fn search_profile_query(profile: &SearchProfile) -> Option<String> {
                 ("duration", "at most") => format!("duration<={safe_value}"),
                 ("duration", "is") => format!("duration>={safe_value} AND duration<={safe_value}"),
                 ("duration", _) => format!("duration>={safe_value}"),
+                ("resolution", "at most") => format!("resolution<={safe_value}"),
+                ("resolution", "is") => format!("resolution:{safe_value}"),
+                ("resolution", _) => format!("resolution>={safe_value}"),
+                ("fps", "at most") => format!("fps:<={safe_value}"),
+                ("fps", "is") => format!("fps:{safe_value}"),
+                ("fps", _) => format!("fps:>={safe_value}"),
                 _ => format!("name:\"{safe_value}\""),
             }
         })
@@ -2021,6 +2033,21 @@ mod rtl_text_tests {
         assert_eq!(
             search_profile_query(&profile).as_deref(),
             Some("size>=500MB AND size<=500MB")
+        );
+    }
+
+    #[test]
+    fn advanced_search_builder_generates_resolution_and_fps_filters() {
+        let profile = SearchProfile {
+            conditions: vec![
+                SearchCondition { field: "resolution".into(), operator: "at least".into(), value: "4K".into(), enabled: true },
+                SearchCondition { field: "fps".into(), operator: "at least".into(), value: "60".into(), enabled: true },
+            ],
+            join_with_or: false,
+        };
+        assert_eq!(
+            search_profile_query(&profile).as_deref(),
+            Some("resolution>=4K AND fps:>=60")
         );
     }
 
