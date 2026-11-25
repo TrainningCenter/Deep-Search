@@ -12,14 +12,16 @@ printf '%s\n' "$*" > "$DEEP_SEARCH_LAUNCHCTL_ARGS"
 if [[ "$1" == "print" && "${MOCK_LAUNCHCTL_INACTIVE:-0}" == "1" ]]; then
   exit 1
 fi
-echo "mock launchctl: $*"
+if [[ "${MOCK_LAUNCHCTL_VERBOSE:-0}" == "1" ]]; then echo "mock launchctl: $*"; fi
 MOCK
 chmod +x "$tmp/launchctl"
 export PATH="$tmp:$PATH"
 export DEEP_SEARCH_LAUNCHCTL_ARGS="$tmp/launchctl-args"
 
+export MOCK_LAUNCHCTL_VERBOSE=1
 output="$(bash "$helper" status)"
 [[ "$output" == *"mock launchctl: print system/com.deepsearch.service"* ]]
+unset MOCK_LAUNCHCTL_VERBOSE
 
 output="$(bash "$helper" is-active)"
 [[ "$output" == "active" ]]
