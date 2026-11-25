@@ -9,6 +9,7 @@ pub struct SearchResult {
     pub name: String,
     pub extension: Option<String>,
     pub size_bytes: u64,
+    pub modified_timestamp_ns: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,6 +19,7 @@ pub enum SearchSortField {
     Path,
     Extension,
     Size,
+    Modified,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -528,17 +530,19 @@ impl Database {
         let condition = compile_expression(expression, &mut values);
         let relevance = name_relevance_order(expression, &mut values);
         let sql = format!(
-            "SELECT path, name, extension, size_bytes FROM files WHERE {condition} ORDER BY {relevance}, name COLLATE NOCASE"
+            "SELECT path, name, extension, size_bytes, modified_unix FROM files WHERE {condition} ORDER BY {relevance}, name COLLATE NOCASE"
         );
         let mut statement = self.connection.prepare(&sql)?;
         let rows = statement.query_map(params_from_iter(values.iter()), |row| {
             let path: String = row.get(0)?;
             let size: i64 = row.get(3)?;
+            let modified: Option<i64> = row.get(4)?;
             Ok(SearchResult {
                 path: path.into(),
                 name: row.get(1)?,
                 extension: row.get(2)?,
                 size_bytes: size.max(0) as u64,
+                modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
             })
         })?;
         rows.collect()
@@ -579,6 +583,7 @@ impl Database {
             SearchSortField::Path => "path COLLATE NOCASE".to_string(),
             SearchSortField::Extension => "extension COLLATE NOCASE".to_string(),
             SearchSortField::Size => "size_bytes".to_string(),
+            SearchSortField::Modified => "modified_unix".to_string(),
         };
         let direction = match sort_direction {
             SearchSortDirection::Ascending => "ASC",
@@ -603,11 +608,13 @@ impl Database {
         let rows = statement.query_map(params_from_iter(values.iter()), |row| {
             let path: String = row.get(0)?;
             let size: i64 = row.get(3)?;
+            let modified: Option<i64> = row.get(4)?;
             Ok(SearchResult {
                 path: path.into(),
                 name: row.get(1)?,
                 extension: row.get(2)?,
                 size_bytes: size.max(0) as u64,
+                modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
             })
         })?;
         rows.collect()
@@ -641,11 +648,13 @@ impl Database {
             let rows = statement.query_map([phrase], |row| {
                 let path: String = row.get(0)?;
                 let size: i64 = row.get(3)?;
+            let modified: Option<i64> = row.get(4)?;
                 Ok(SearchResult {
                     path: path.into(),
                     name: row.get(1)?,
                     extension: row.get(2)?,
                     size_bytes: size.max(0) as u64,
+                    modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
                 })
             })?;
             rows.collect()
@@ -663,11 +672,13 @@ impl Database {
             let rows = statement.query_map([pattern], |row| {
                 let path: String = row.get(0)?;
                 let size: i64 = row.get(3)?;
+            let modified: Option<i64> = row.get(4)?;
                 Ok(SearchResult {
                     path: path.into(),
                     name: row.get(1)?,
                     extension: row.get(2)?,
                     size_bytes: size.max(0) as u64,
+                    modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
                 })
             })?;
             rows.collect()
@@ -705,12 +716,14 @@ impl Database {
         let rows = statement.query_map(params![pattern, term, prefix], |row| {
             let path: String = row.get(0)?;
             let size: i64 = row.get(3)?;
+            let modified: Option<i64> = row.get(4)?;
 
             Ok(SearchResult {
                 path: path.into(),
                 name: row.get(1)?,
                 extension: row.get(2)?,
                 size_bytes: size.max(0) as u64,
+                modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
             })
         })?;
 
@@ -737,12 +750,14 @@ impl Database {
         let rows = statement.query_map([extension], |row| {
             let path: String = row.get(0)?;
             let size: i64 = row.get(3)?;
+            let modified: Option<i64> = row.get(4)?;
 
             Ok(SearchResult {
                 path: path.into(),
                 name: row.get(1)?,
                 extension: row.get(2)?,
                 size_bytes: size.max(0) as u64,
+                modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
             })
         })?;
 
@@ -772,12 +787,14 @@ impl Database {
             |row| {
                 let path: String = row.get(0)?;
                 let size: i64 = row.get(3)?;
+            let modified: Option<i64> = row.get(4)?;
 
                 Ok(SearchResult {
                     path: path.into(),
                     name: row.get(1)?,
                     extension: row.get(2)?,
                     size_bytes: size.max(0) as u64,
+                    modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
                 })
             },
         )?;
@@ -909,6 +926,35 @@ mod database_tests {
             by_name.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(),
             vec!["zeta.txt", "beta.txt", "alpha.pdf"],
         );
+    }
+
+    #[test]
+    fn returns_modification_time_and_sorts_by_it() {
+        let db = Database::open(":memory:").unwrap();
+        let mut older = sample_file("older.txt", 10);
+        older.modified_timestamp_ns = Some(100);
+        let mut newer = sample_file("newer.txt", 20);
+        newer.modified_timestamp_ns = Some(300);
+        let mut undated = sample_file("undated.txt", 30);
+        undated.modified_timestamp_ns = None;
+        db.upsert_file(&older).unwrap();
+        db.upsert_file(&newer).unwrap();
+        db.upsert_file(&undated).unwrap();
+
+        let results = db.search_page_sorted(
+            &SearchExpression::NameContains(String::new()),
+            10,
+            0,
+            SearchSortField::Modified,
+            SearchSortDirection::Descending,
+        ).unwrap();
+
+        assert_eq!(results[0].name, "newer.txt");
+        assert_eq!(results[0].modified_timestamp_ns, Some(300));
+        assert_eq!(results[1].name, "older.txt");
+        assert_eq!(results[1].modified_timestamp_ns, Some(100));
+        assert_eq!(results[2].name, "undated.txt");
+        assert_eq!(results[2].modified_timestamp_ns, None);
     }
 
     #[test]
