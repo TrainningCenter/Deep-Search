@@ -248,6 +248,11 @@ impl Database {
                 path TEXT PRIMARY KEY
             );
 
+            CREATE TABLE IF NOT EXISTS service_settings (
+                key TEXT PRIMARY KEY NOT NULL,
+                value TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS media_metadata (
                 file_path TEXT PRIMARY KEY NOT NULL REFERENCES files(path) ON DELETE CASCADE,
                 metadata_json TEXT NOT NULL
@@ -611,6 +616,24 @@ impl Database {
             Ok(std::path::PathBuf::from(path))
         })?;
         rows.collect()
+    }
+
+    pub fn stop_on_logout(&self) -> Result<bool> {
+        let value: Option<String> = self.connection.query_row(
+            "SELECT value FROM service_settings WHERE key = 'stop_on_logout'",
+            [],
+            |row| row.get(0),
+        ).optional()?;
+        Ok(value.as_deref() == Some("true"))
+    }
+
+    pub fn set_stop_on_logout(&self, enabled: bool) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO service_settings(key, value) VALUES ('stop_on_logout', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [if enabled { "true" } else { "false" }],
+        )?;
+        Ok(())
     }
 
     /// Delete a file or an entire removed directory subtree from the index.
@@ -1370,6 +1393,16 @@ mod database_tests {
         assert!(db.search_by_name("first").unwrap().is_empty());
         assert!(db.search_by_name("nested").unwrap().is_empty());
         assert_eq!(db.search_by_name("sibling").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn persists_stop_on_logout_setting_and_defaults_to_disabled() {
+        let db = Database::open(":memory:").unwrap();
+        assert!(!db.stop_on_logout().unwrap());
+        db.set_stop_on_logout(true).unwrap();
+        assert!(db.stop_on_logout().unwrap());
+        db.set_stop_on_logout(false).unwrap();
+        assert!(!db.stop_on_logout().unwrap());
     }
 
     #[test]
