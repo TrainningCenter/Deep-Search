@@ -116,14 +116,60 @@ fn parse_condition(token: &str) -> Result<SearchExpression, String> {
     }
     if lower.starts_with("size>=") { return Ok(SearchExpression::SizeAtLeast(parse_size(&token[6..])?)); }
     if lower.starts_with("size<=") { return Ok(SearchExpression::SizeAtMost(parse_size(&token[6..])?)); }
-    if token.contains(':') || lower.starts_with("size>") || lower.starts_with("size<") {
-        return Err(format!("Unknown condition '{token}'. Use name:, path:, content:, ext:, type:, size>= or size<="));
+    if lower.starts_with("duration>=") { return Ok(SearchExpression::DurationAtLeast(parse_duration(&token[10..])?)); }
+    if lower.starts_with("duration<=") { return Ok(SearchExpression::DurationAtMost(parse_duration(&token[10..])?)); }
+    if token.contains(':') || lower.starts_with("size>") || lower.starts_with("size<") || lower.starts_with("duration>") || lower.starts_with("duration<") {
+        return Err(format!("Unknown condition '{token}'. Use name:, path:, content:, ext:, type:, size>=, size<=, duration>= or duration<="));
     }
     Ok(SearchExpression::Or(vec![
         SearchExpression::NameContains(token.to_string()),
         SearchExpression::PathContains(token.to_string()),
         SearchExpression::ContentContains(token.to_string()),
     ]))
+}
+
+fn parse_duration(value: &str) -> Result<u64, String> {
+    let value = value.trim().to_ascii_lowercase();
+    if value.is_empty() {
+        return Err("Duration requires a value".into());
+    }
+    if value.contains(':') {
+        let parts = value.split(':').collect::<Vec<_>>();
+        if !(2..=3).contains(&parts.len()) {
+            return Err(format!("Invalid duration: {value}"));
+        }
+        let numbers = parts.iter().map(|part| part.parse::<f64>()
+            .map_err(|_| format!("Invalid duration: {value}")))
+            .collect::<Result<Vec<_>, _>>()?;
+        if numbers.iter().any(|number| !number.is_finite() || *number < 0.0) {
+            return Err(format!("Invalid duration: {value}"));
+        }
+        let seconds = if numbers.len() == 2 {
+            numbers[0] * 60.0 + numbers[1]
+        } else {
+            numbers[0] * 3600.0 + numbers[1] * 60.0 + numbers[2]
+        };
+        if numbers.last().is_some_and(|seconds| *seconds >= 60.0) && numbers.len() > 1 {
+            return Err(format!("Invalid duration: {value}"));
+        }
+        let milliseconds = seconds * 1000.0;
+        if milliseconds > u64::MAX as f64 { return Err("Duration is too large".into()); }
+        return Ok(milliseconds.round() as u64);
+    }
+    let split = value.find(|ch: char| !ch.is_ascii_digit() && ch != '.').unwrap_or(value.len());
+    let (number, unit) = value.split_at(split);
+    let amount: f64 = number.parse().map_err(|_| format!("Invalid duration: {value}"))?;
+    if !amount.is_finite() || amount < 0.0 { return Err(format!("Invalid duration: {value}")); }
+    let multiplier = match unit.trim() {
+        "" | "s" | "sec" | "secs" | "second" | "seconds" => 1_000.0,
+        "ms" | "millisecond" | "milliseconds" => 1.0,
+        "m" | "min" | "mins" | "minute" | "minutes" => 60_000.0,
+        "h" | "hr" | "hrs" | "hour" | "hours" => 3_600_000.0,
+        _ => return Err(format!("Unknown duration unit: {unit}")),
+    };
+    let milliseconds = amount * multiplier;
+    if milliseconds > u64::MAX as f64 { return Err("Duration is too large".into()); }
+    Ok(milliseconds.round() as u64)
 }
 
 fn parse_size(value: &str) -> Result<u64, String> {
@@ -148,6 +194,20 @@ fn parse_size(value: &str) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_duration_filters_in_seconds_minutes_and_clock_format() {
+        assert_eq!(parse_query("duration>=90s").unwrap(), SearchExpression::DurationAtLeast(90_000));
+        assert_eq!(parse_query("duration<=2h").unwrap(), SearchExpression::DurationAtMost(7_200_000));
+        assert_eq!(parse_query("duration>=1:30").unwrap(), SearchExpression::DurationAtLeast(90_000));
+        assert_eq!(parse_query("duration<=01:02:03").unwrap(), SearchExpression::DurationAtMost(3_723_000));
+    }
+
+    #[test]
+    fn rejects_invalid_duration_filters() {
+        assert!(parse_query("duration>=2fortnights").is_err());
+        assert!(parse_query("duration>=1:90").is_err());
+    }
 
     #[test]
     fn parses_boolean_query_with_parentheses_and_size_units() {
