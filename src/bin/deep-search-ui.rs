@@ -566,53 +566,57 @@ struct ResultsTableDelegate<'a> {
 
 impl TableDelegate for ResultsTableDelegate<'_> {
     fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell: &HeaderCellInfo) {
-        *ui.layout_mut() = if self.arabic {
+        let layout = if self.arabic {
             egui::Layout::right_to_left(egui::Align::Center)
         } else {
             egui::Layout::left_to_right(egui::Align::Center)
         };
-        if let Some(column) = self.columns.get(cell.col_range.start) {
-            ui.strong(column_label(&column.key, self.arabic));
-        }
+        ui.with_layout(layout, |ui| {
+            if let Some(column) = self.columns.get(cell.col_range.start) {
+                ui.strong(column_label(&column.key, self.arabic));
+            }
+        });
     }
 
     fn cell_ui(&mut self, ui: &mut egui::Ui, cell: &CellInfo) {
-        *ui.layout_mut() = if self.arabic {
+        let layout = if self.arabic {
             egui::Layout::right_to_left(egui::Align::Center)
         } else {
             egui::Layout::left_to_right(egui::Align::Center)
         };
-        let Some(column) = self.columns.get(cell.col_nr) else { return; };
-        let Some(result) = self.results.get(cell.row_nr as usize) else { return; };
-        if cell.row_nr % 2 == 1 {
-            ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
-        }
-        let value = result_column_text(result, &column.key);
-        if column.key == "name" {
-            let path = result.get("path").and_then(Value::as_str).unwrap_or("").to_owned();
-            let response = ui.add(
-                egui::Label::new(value).truncate().sense(egui::Sense::click())
-            );
-            if response.double_clicked() && !path.is_empty() {
-                open_path_in_default_app(path.clone());
+        ui.with_layout(layout, |ui| {
+            let Some(column) = self.columns.get(cell.col_nr) else { return; };
+            let Some(result) = self.results.get(cell.row_nr as usize) else { return; };
+            if cell.row_nr % 2 == 1 {
+                ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
             }
-            response.context_menu(|ui| {
-                if ui.add_enabled(!path.is_empty(), egui::Button::new(
-                    if self.arabic { "فتح الملف" } else { "Open file" }
-                )).clicked() {
+            let value = result_column_text(result, &column.key);
+            if column.key == "name" {
+                let path = result.get("path").and_then(Value::as_str).unwrap_or("").to_owned();
+                let response = ui.add(
+                    egui::Label::new(value).truncate().sense(egui::Sense::click())
+                );
+                if response.double_clicked() && !path.is_empty() {
                     open_path_in_default_app(path.clone());
-                    ui.close_menu();
                 }
-                if ui.add_enabled(!path.is_empty(), egui::Button::new(
-                    if self.arabic { "نسخ المسار الكامل" } else { "Copy full path" }
-                )).clicked() {
-                    ui.ctx().copy_text(path.clone());
-                    ui.close_menu();
-                }
-            });
-        } else {
-            ui.add(egui::Label::new(value).truncate());
-        }
+                response.context_menu(|ui| {
+                    if ui.add_enabled(!path.is_empty(), egui::Button::new(
+                        if self.arabic { "فتح الملف" } else { "Open file" }
+                    )).clicked() {
+                        open_path_in_default_app(path.clone());
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(!path.is_empty(), egui::Button::new(
+                        if self.arabic { "نسخ المسار الكامل" } else { "Copy full path" }
+                    )).clicked() {
+                        ui.ctx().copy_text(path.clone());
+                        ui.close_menu();
+                    }
+                });
+            } else {
+                ui.add(egui::Label::new(value).truncate());
+            }
+        });
     }
 
     fn default_row_height(&self) -> f32 {
