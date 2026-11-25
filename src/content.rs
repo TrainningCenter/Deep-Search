@@ -519,7 +519,11 @@ fn extract_zip_archive_text(path: &Path) -> Option<String> {
             append_archive_text(&mut output, " ");
         }
 
-        let mut archive = zip::ZipArchive::new(Cursor::new(archive_bytes)).ok()?;
+        let mut archive = match zip::ZipArchive::new(Cursor::new(archive_bytes)) {
+            Ok(archive) => archive,
+            Err(_) if archive_name.is_empty() => return None,
+            Err(_) => continue,
+        };
         for index in 0..archive.len() {
             let mut entry = match archive.by_index(index) {
                 Ok(entry) => entry,
@@ -589,8 +593,8 @@ fn extract_zip_archive_text(path: &Path) -> Option<String> {
 }
 
 /// Extract searchable text from supported document formats.
-/// Plain text is limited to 1 MiB; PDF and office archives have stricter
-/// input, archive-entry, decompressed-size, and output limits.
+/// Plain text is limited to 1 MiB; PDF and archive formats have stricter
+/// input, entry-count, decompressed-size, and output limits.
 pub fn extract_text(path: &Path, size_bytes: u64) -> Option<String> {
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
 
@@ -608,6 +612,11 @@ pub fn extract_text(path: &Path, size_bytes: u64) -> Option<String> {
         "yaml" | "yml" | "ini" | "conf" | "cfg" | "sql" |
         "py" | "sh" | "bash" | "c" | "h" | "cpp" | "hpp" |
         "java" | "go" | "php" | "rb" | "swift" | "kt" |
+        "cs" | "ps1" | "psm1" | "psd1" | "bat" | "cmd" |
+        "vue" | "svelte" | "gradle" | "properties" | "proto" |
+        "graphql" | "json5" | "m" | "mm" | "scala" | "lua" |
+        "pl" | "r" | "dart" | "ex" | "exs" | "erl" | "hs" |
+        "clj" | "asm" | "s" | "svg" | "xhtml" |
         "env" | "rst" | "tex" => {
             if size_bytes > MAX_PLAIN_TEXT_SIZE {
                 return None;

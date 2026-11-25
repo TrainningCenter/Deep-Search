@@ -194,7 +194,7 @@ fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) ->
                 "audio" => &["aac", "aif", "aiff", "alac", "flac", "m4a", "mp3", "ogg", "opus", "wav", "wma"],
                 "image" => &["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp"],
                 "document" => &["csv", "doc", "docx", "md", "odt", "pdf", "ppt", "pptx", "rtf", "txt", "xls", "xlsx"],
-                "archive" => &["7z", "bz2", "gz", "rar", "tar", "xz", "zip"],
+                "archive" => &["7z", "apk", "bz2", "cbz", "epub", "gz", "jar", "rar", "tar", "xz", "zip"],
                 _ => return "0 = 1".to_string(),
             };
             let placeholders: Vec<String> = extensions.iter().map(|extension| {
