@@ -51,6 +51,51 @@ jobs:
       - name: Run tests
         run: cargo test --all-targets
 
+      - name: Build Docker service image
+        run: docker build --tag deep-search:ci .
+
+      - name: Smoke-test Docker service
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker volume create deep-search-ci-data >/dev/null
+          cleanup() {
+            docker rm -f deep-search-ci >/dev/null 2>&1 || true
+            docker volume rm deep-search-ci-data >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run --detach --name deep-search-ci \
+            --publish 127.0.0.1:14765:4765 \
+            --volume deep-search-ci-data:/data \
+            --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --user 10001:10001 --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            deep-search:ci
+          python3 - <<'PY'
+          import json
+          import socket
+          import time
+
+          for attempt in range(30):
+              try:
+                  with socket.create_connection(("127.0.0.1", 14765), timeout=1) as connection:
+                      connection.sendall(b'{"command":"status"}\\n')
+                      response = b""
+                      while not response.endswith(b"\\n"):
+                          chunk = connection.recv(65536)
+                          if not chunk:
+                              raise RuntimeError("Docker service closed the status connection")
+                          response += chunk
+                  status = json.loads(response)
+                  assert "version" in status, status
+                  print("Docker service status:", status)
+                  break
+              except (OSError, RuntimeError):
+                  if attempt == 29:
+                      raise
+                  time.sleep(1)
+          PY
+
       - name: Check desktop application
         run: cargo check --features desktop --bin deep-search-ui
 
