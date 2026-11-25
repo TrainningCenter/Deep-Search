@@ -1004,7 +1004,9 @@ impl Database {
             SearchSortDirection::Descending => "DESC",
         };
         let order_by = if sort_field == SearchSortField::Relevance {
-            format!("{order_by}, name COLLATE NOCASE, path COLLATE NOCASE")
+            format!(
+                "{order_by} {direction}, name COLLATE NOCASE {direction}, path COLLATE NOCASE {direction}"
+            )
         } else {
             format!("{order_by} {direction}, name COLLATE NOCASE, path COLLATE NOCASE")
         };
@@ -1376,6 +1378,31 @@ mod database_tests {
         assert_eq!(
             by_name.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(),
             vec!["zeta.txt", "beta.txt", "alpha.pdf"],
+        );
+    }
+
+    #[test]
+    fn relevance_sort_respects_ascending_and_descending_direction() {
+        let db = Database::open(":memory:").unwrap();
+        for name in ["report.txt", "reporting.txt", "annual-report.txt"] {
+            db.upsert_file(&sample_file(name, 10)).unwrap();
+        }
+        let expression = SearchExpression::NameContains("report".into());
+
+        let ascending = db.search_page_sorted(
+            &expression, 10, 0, SearchSortField::Relevance, SearchSortDirection::Ascending,
+        ).unwrap();
+        assert_eq!(
+            ascending.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(),
+            vec!["report.txt", "reporting.txt", "annual-report.txt"],
+        );
+
+        let descending = db.search_page_sorted(
+            &expression, 10, 0, SearchSortField::Relevance, SearchSortDirection::Descending,
+        ).unwrap();
+        assert_eq!(
+            descending.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(),
+            vec!["annual-report.txt", "reporting.txt", "report.txt"],
         );
     }
 
