@@ -1,7 +1,10 @@
 use deep_search::client::{CompleteSearch, ServiceClient};
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
@@ -10,6 +13,90 @@ enum UiMessage {
     Indexed(Value),
     Search(CompleteSearch),
     Error(String),
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct ColumnSetting {
+    key: String,
+    visible: bool,
+    width: f32,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct ViewProfile {
+    columns: Vec<ColumnSetting>,
+    row_height: f32,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct UiSettings {
+    profiles: BTreeMap<String, ViewProfile>,
+    active_profile: String,
+}
+
+fn default_columns() -> Vec<ColumnSetting> {
+    vec![
+        ColumnSetting { key: "name".into(), visible: true, width: 260.0 },
+        ColumnSetting { key: "extension".into(), visible: true, width: 90.0 },
+        ColumnSetting { key: "size".into(), visible: true, width: 110.0 },
+        ColumnSetting { key: "modified".into(), visible: false, width: 160.0 },
+        ColumnSetting { key: "path".into(), visible: true, width: 420.0 },
+    ]
+}
+
+fn default_profile(columns: &[&str]) -> ViewProfile {
+    let mut settings = default_columns();
+    for column in &mut settings {
+        column.visible = columns.contains(&column.key.as_str());
+    }
+    ViewProfile { columns: settings, row_height: 25.0 }
+}
+
+fn settings_path() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    let base = std::env::var_os("APPDATA").map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    #[cfg(target_os = "macos")]
+    let base = std::env::var_os("HOME").map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+        .join("Library").join("Application Support");
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let base = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    base.join("deep-search").join("ui-settings.json")
+}
+
+impl UiSettings {
+    fn load() -> Self {
+        let mut settings = std::fs::read(settings_path())
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Self>(&bytes).ok())
+            .unwrap_or_default();
+        if settings.profiles.is_empty() {
+            settings.profiles.insert("Default".into(), default_profile(&["name", "extension", "size", "path"]));
+            settings.profiles.insert("Videos".into(), default_profile(&["name", "extension", "size", "modified", "path"]));
+            settings.profiles.insert("Documents".into(), default_profile(&["name", "extension", "modified", "size", "path"]));
+            settings.profiles.insert("Large files".into(), default_profile(&["name", "size", "extension", "path"]));
+            settings.profiles.insert("NAS".into(), default_profile(&["name", "size", "modified", "path"]));
+            settings.active_profile = "Default".into();
+            settings.save();
+        }
+        if !settings.profiles.contains_key(&settings.active_profile) {
+            settings.active_profile = settings.profiles.keys().next().cloned().unwrap_or_default();
+        }
+        settings
+    }
+
+    fn save(&self) {
+        let path = settings_path();
+        if let Some(parent) = path.parent() {
+            if std::fs::create_dir_all(parent).is_err() { return; }
+        }
+        if let Ok(bytes) = serde_json::to_vec_pretty(self) {
+            let _ = std::fs::write(path, bytes);
+        }
+    }
 }
 
 struct DeepSearchApp {
@@ -25,11 +112,15 @@ struct DeepSearchApp {
     busy: bool,
     sender: Sender<UiMessage>,
     receiver: Receiver<UiMessage>,
+    settings: UiSettings,
+    new_profile_name: String,
+    arabic: bool,
 }
 
 impl Default for DeepSearchApp {
     fn default() -> Self {
         let (sender, receiver) = mpsc::channel();
+        let settings = UiSettings::load();
         Self {
             service_address: "127.0.0.1:4765".to_owned(),
             search_query: "type:video".to_owned(),
@@ -43,6 +134,9 @@ impl Default for DeepSearchApp {
             busy: false,
             sender,
             receiver,
+            settings,
+            new_profile_name: String::new(),
+            arabic: false,
         }
     }
 }
@@ -50,6 +144,37 @@ impl Default for DeepSearchApp {
 impl DeepSearchApp {
     fn client(&self) -> ServiceClient {
         ServiceClient::new(self.service_address.trim().to_owned())
+    }
+
+    fn active_profile(&self) -> &ViewProfile {
+        self.settings.profiles.get(&self.settings.active_profile)
+            .expect("an active view profile is always initialized")
+    }
+
+    fn active_profile_mut(&mut self) -> &mut ViewProfile {
+        self.settings.profiles.get_mut(&self.settings.active_profile)
+            .expect("an active view profile is always initialized")
+    }
+
+    fn persist_settings(&self) {
+        self.settings.save();
+    }
+
+    fn activate_profile(&mut self, name: String) {
+        if self.settings.profiles.contains_key(&name) {
+            self.settings.active_profile = name;
+            self.persist_settings();
+        }
+    }
+
+    fn save_profile_as(&mut self) {
+        let name = self.new_profile_name.trim().to_owned();
+        if name.is_empty() { return; }
+        let profile = self.active_profile().clone();
+        self.settings.profiles.insert(name.clone(), profile);
+        self.settings.active_profile = name;
+        self.new_profile_name.clear();
+        self.persist_settings();
     }
 
     fn check_status(&mut self) {
@@ -66,10 +191,8 @@ impl DeepSearchApp {
 
     fn index_roots(&mut self) {
         let paths: Vec<String> = self.roots.lines()
-            .map(str::trim)
-            .filter(|path| !path.is_empty())
-            .map(str::to_owned)
-            .collect();
+            .map(str::trim).filter(|path| !path.is_empty())
+            .map(str::to_owned).collect();
         if paths.is_empty() {
             self.message = "Enter at least one folder path (one path per line).".to_owned();
             return;
@@ -139,42 +262,86 @@ impl DeepSearchApp {
         }
     }
 
-    fn result_table(&mut self, ui: &mut egui::Ui) {
+    fn render_column_controls(&mut self, ui: &mut egui::Ui) {
+        ui.heading(if self.arabic { "إعدادات الأعمدة" } else { "Columns & layout" });
+        let mut changed = false;
+        let mut move_request: Option<(usize, isize)> = None;
+        let columns = &mut self.active_profile_mut().columns;
+        for index in 0..columns.len() {
+            ui.horizontal(|ui| {
+                let column = &mut columns[index];
+                changed |= ui.checkbox(&mut column.visible, column.key.as_str()).changed();
+                ui.add(egui::DragValue::new(&mut column.width).range(60.0..=1200.0).speed(5.0).suffix(" px"));
+                if ui.small_button("↑").clicked() && index > 0 {
+                    move_request = Some((index, -1));
+                }
+                if ui.small_button("↓").clicked() && index + 1 < columns.len() {
+                    move_request = Some((index, 1));
+                }
+            });
+        }
+        if let Some((index, direction)) = move_request {
+            let target = (index as isize + direction) as usize;
+            columns.swap(index, target);
+            changed = true;
+        }
+        let row_height = &mut self.active_profile_mut().row_height;
+        ui.horizontal(|ui| {
+            ui.label(if self.arabic { "ارتفاع الصف" } else { "Row height" });
+            changed |= ui.add(egui::Slider::new(row_height, 18.0..=60.0).suffix(" px")).changed();
+        });
+        if ui.button(if self.arabic { "ملاءمة تلقائية للأعمدة" } else { "Auto-fit columns" }).clicked() {
+            for column in &mut self.active_profile_mut().columns {
+                column.width = match column.key.as_str() {
+                    "name" => 260.0, "extension" => 100.0, "size" => 120.0,
+                    "modified" => 180.0, "path" => 520.0, _ => 160.0,
+                };
+            }
+            changed = true;
+        }
+        if changed { self.persist_settings(); }
+    }
+
+    fn render_results(&mut self, ui: &mut egui::Ui) {
         ui.label(format!("{} result(s)", self.total));
-        TableBuilder::new(ui)
+        let columns = self.active_profile().columns.iter()
+            .filter(|column| column.visible).cloned().collect::<Vec<_>>();
+        if columns.is_empty() {
+            ui.centered_and_justified(|ui| ui.label("Show at least one column in Columns & layout."));
+            return;
+        }
+        let row_height = self.active_profile().row_height;
+        let mut table = TableBuilder::new(ui)
             .striped(true)
             .resizable(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::initial(260.0).at_least(100.0))
-            .column(Column::initial(90.0).at_least(60.0))
-            .column(Column::initial(110.0).at_least(70.0))
-            .column(Column::remainder().at_least(220.0))
-            .header(26.0, |mut header| {
-                header.col(|ui| { ui.strong("Name"); });
-                header.col(|ui| { ui.strong("Extension"); });
-                header.col(|ui| { ui.strong("Size"); });
-                header.col(|ui| { ui.strong("Path"); });
-            })
-            .body(|body| {
-                body.rows(25.0, self.results.len(), |mut row| {
-                    let result = &self.results[row.index()];
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+        for column in &columns {
+            table = table.column(Column::initial(column.width).at_least(60.0));
+        }
+        table.header(28.0, |mut header| {
+            for column in &columns {
+                header.col(|ui| { ui.strong(column.key.to_uppercase()); });
+            }
+        }).body(|body| {
+            body.rows(row_height, self.results.len(), |mut row| {
+                let result = &self.results[row.index()];
+                for column in &columns {
                     row.col(|ui| {
-                        ui.label(result.get("name").and_then(Value::as_str).unwrap_or("—"));
+                        match column.key.as_str() {
+                            "name" | "extension" | "path" | "modified" => {
+                                let value = result.get(&column.key).and_then(Value::as_str).unwrap_or("—");
+                                ui.add(egui::Label::new(value).truncate());
+                            }
+                            "size" => {
+                                let size = result.get("size_bytes").and_then(Value::as_u64).unwrap_or(0);
+                                ui.label(format_size(size));
+                            }
+                            _ => { ui.label("—"); }
+                        }
                     });
-                    row.col(|ui| {
-                        ui.label(result.get("extension").and_then(Value::as_str).unwrap_or("—"));
-                    });
-                    row.col(|ui| {
-                        let size = result.get("size_bytes").and_then(Value::as_u64).unwrap_or(0);
-                        ui.label(format_size(size));
-                    });
-                    row.col(|ui| {
-                        ui.add(egui::Label::new(
-                            result.get("path").and_then(Value::as_str).unwrap_or("—")
-                        ).truncate());
-                    });
-                });
+                }
             });
+        });
     }
 }
 
@@ -186,69 +353,78 @@ impl eframe::App for DeepSearchApp {
                 ui.heading("Deep-Search");
                 ui.separator();
                 ui.label("Desktop Alpha");
+                ui.separator();
+                let profiles = self.settings.profiles.keys().cloned().collect::<Vec<_>>();
+                let active = self.settings.active_profile.clone();
+                egui::ComboBox::from_id_salt("view_profiles")
+                    .selected_text(&active)
+                    .show_ui(ui, |ui| {
+                        for profile in profiles {
+                            if ui.selectable_label(profile == active, &profile).clicked() {
+                                self.activate_profile(profile);
+                            }
+                        }
+                    });
+                if ui.button("Save profile").clicked() { self.persist_settings(); }
+                ui.add(egui::TextEdit::singleline(&mut self.new_profile_name).hint_text("New profile name").desired_width(130.0));
+                if ui.button("Save as").clicked() { self.save_profile_as(); }
+                if ui.button(if self.arabic { "English" } else { "العربية" }).clicked() {
+                    self.arabic = !self.arabic;
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(count) = self.indexed_files {
-                        ui.label(format!("{count} indexed files"));
-                    }
+                    if let Some(count) = self.indexed_files { ui.label(format!("{count} indexed files")); }
                 });
             });
         });
 
-        egui::SidePanel::left("sources")
-            .resizable(true)
-            .default_width(270.0)
-            .show(ctx, |ui| {
-                ui.heading("Service");
-                ui.label("Address");
-                ui.text_edit_singleline(&mut self.service_address);
-                if ui.button("Connect / Refresh status").clicked() {
-                    self.check_status();
-                }
-                ui.separator();
-                ui.heading("Index locations");
-                ui.label("Enter one folder path per line:");
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.roots)
-                        .desired_rows(5)
-                        .desired_width(f32::INFINITY)
-                );
-                if ui.add_enabled(!self.busy, egui::Button::new("Index locations")).clicked() {
-                    self.index_roots();
-                }
-                ui.separator();
-                ui.heading("Search");
-                ui.label("Query");
-                ui.text_edit_singleline(&mut self.search_query);
-                egui::ComboBox::from_label("Sort by")
-                    .selected_text(&self.sort_field)
-                    .show_ui(ui, |ui| {
-                        for field in ["name", "path", "extension", "size", "modified", "relevance"] {
-                            ui.selectable_value(&mut self.sort_field, field.to_owned(), field);
-                        }
-                    });
-                ui.checkbox(&mut self.descending, "Descending");
-                if ui.add_enabled(!self.busy, egui::Button::new("Search all results")).clicked() {
-                    self.search();
-                }
-                ui.separator();
-                if self.busy {
-                    ui.spinner();
-                }
-                ui.label(&self.message);
-            });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Search results");
-            ui.label("One continuous table · all matches are fetched automatically · resize columns by dragging");
+        egui::SidePanel::left("sources").resizable(true).default_width(290.0).show(ctx, |ui| {
+            ui.heading(if self.arabic { "الخدمة" } else { "Service" });
+            ui.label(if self.arabic { "عنوان الخدمة" } else { "Address" });
+            ui.text_edit_singleline(&mut self.service_address);
+            if ui.button(if self.arabic { "اتصال / تحديث الحالة" } else { "Connect / Refresh status" }).clicked() {
+                self.check_status();
+            }
             ui.separator();
-            egui::ScrollArea::both()
-                .auto_shrink([false, false])
-                .show(ui, |ui| self.result_table(ui));
+            ui.heading(if self.arabic { "مجلدات الفهرسة" } else { "Index locations" });
+            ui.label(if self.arabic { "مسار مجلد في كل سطر:" } else { "One folder path per line:" });
+            ui.add(egui::TextEdit::multiline(&mut self.roots).desired_rows(4).desired_width(f32::INFINITY));
+            if ui.add_enabled(!self.busy, egui::Button::new(if self.arabic { "ابدأ الفهرسة" } else { "Index locations" })).clicked() {
+                self.index_roots();
+            }
+            ui.separator();
+            ui.heading(if self.arabic { "بحث" } else { "Search" });
+            ui.text_edit_singleline(&mut self.search_query);
+            egui::ComboBox::from_label(if self.arabic { "ترتيب حسب" } else { "Sort by" })
+                .selected_text(&self.sort_field).show_ui(ui, |ui| {
+                    for field in ["name", "path", "extension", "size", "modified", "relevance"] {
+                        ui.selectable_value(&mut self.sort_field, field.to_owned(), field);
+                    }
+                });
+            ui.checkbox(&mut self.descending, if self.arabic { "ترتيب تنازلي" } else { "Descending" });
+            if ui.add_enabled(!self.busy, egui::Button::new(if self.arabic { "بحث في كل النتائج" } else { "Search all results" })).clicked() {
+                self.search();
+            }
+            ui.separator();
+            if self.busy { ui.spinner(); }
+            ui.label(&self.message);
         });
 
-        if self.busy {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
-        }
+        egui::SidePanel::right("view_settings").resizable(true).default_width(270.0).show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| self.render_column_controls(ui));
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading(if self.arabic { "نتائج البحث" } else { "Search results" });
+            ui.label(if self.arabic {
+                "جدول واحد مستمر · يتم جلب جميع النتائج تلقائيًا · يمكن تغيير عرض الأعمدة"
+            } else {
+                "One continuous table · all matches are fetched automatically · resize columns by dragging"
+            });
+            ui.separator();
+            egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| self.render_results(ui));
+        });
+
+        if self.busy { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
     }
 }
 
@@ -266,8 +442,8 @@ fn format_size(bytes: u64) -> String {
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([900.0, 600.0]),
+            .with_inner_size([1440.0, 900.0])
+            .with_min_inner_size([1000.0, 650.0]),
         ..Default::default()
     };
     eframe::run_native(
@@ -275,8 +451,6 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|_creation_context| {
             let mut app = DeepSearchApp::default();
-            // Try the local background service immediately when the window opens.
-            // The user can still change the address and reconnect manually.
             app.check_status();
             Ok(Box::new(app))
         }),
