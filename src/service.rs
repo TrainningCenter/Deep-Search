@@ -21,8 +21,10 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
     let engine = SearchEngine::open(database_path)?;
     let initial_roots = engine.index_roots()?;
     let index_lock = Arc::new(Mutex::new(()));
+    let watcher_database_path = std::fs::canonicalize(database_path)
+        .unwrap_or_else(|_| database_path.to_path_buf());
     let watch_roots = spawn_filesystem_watcher(
-        database_path.to_path_buf(),
+        watcher_database_path,
         initial_roots,
         Arc::clone(&index_lock),
     );
@@ -95,8 +97,11 @@ fn spawn_filesystem_watcher(
             }
         };
 
+        let mut pending_paths = HashSet::<PathBuf>::new();
         let mut pending = false;
+        let mut force_full_refresh = false;
         let mut last_event = Instant::now();
+        let mut last_full_refresh = Instant::now();
         loop {
             while let Ok(root) = root_receiver.try_recv() {
                 register_watch(&mut watcher, &root, &mut watched);
@@ -107,6 +112,11 @@ fn spawn_filesystem_watcher(
                     if event_requires_reindex(&event.kind)
                         && !event_is_database_internal(&event, &database_path)
                     {
+                        if event.paths.is_empty() {
+                            force_full_refresh = true;
+                        } else {
+                            pending_paths.extend(event.paths.iter().cloned());
+                        }
                         pending = true;
                         last_event = Instant::now();
                     }
@@ -116,29 +126,47 @@ fn spawn_filesystem_watcher(
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
 
-            if pending && last_event.elapsed() >= Duration::from_millis(750) {
+            let periodic_refresh_due = last_full_refresh.elapsed() >= Duration::from_secs(600);
+            let event_refresh_due = pending && last_event.elapsed() >= Duration::from_millis(750);
+            if periodic_refresh_due || event_refresh_due {
                 match index_lock.lock() {
                     Ok(_guard) => {
-                        match engine.index_roots() {
-                            Ok(roots) if !roots.is_empty() => {
-                                let paths = roots.iter().map(PathBuf::as_path).collect::<Vec<_>>();
-                                let report = engine.index_paths(&paths);
-                                eprintln!(
-                                    "Automatic refresh complete: {} discovered, {} saved, {} removed, {} errors",
-                                    report.files_discovered, report.files_saved,
-                                    report.files_removed, report.errors
-                                );
-                                for root in roots {
-                                    register_watch(&mut watcher, &root, &mut watched);
+                        let report = if periodic_refresh_due || force_full_refresh {
+                            match engine.index_roots() {
+                                Ok(roots) if !roots.is_empty() => {
+                                    let paths = roots.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+                                    for root in &roots {
+                                        register_watch(&mut watcher, root, &mut watched);
+                                    }
+                                    engine.index_paths(&paths)
+                                }
+                                Ok(_) => IndexingReport::default(),
+                                Err(error) => {
+                                    eprintln!("Could not read configured index roots: {error}");
+                                    IndexingReport { errors: 1, ..IndexingReport::default() }
                                 }
                             }
-                            Ok(_) => {}
-                            Err(error) => eprintln!("Could not read configured index roots: {error}"),
+                        } else {
+                            let paths = pending_paths.iter().cloned().collect::<Vec<_>>();
+                            engine.refresh_changed_paths(&paths)
+                        };
+                        eprintln!(
+                            "Automatic refresh complete: {} discovered, {} saved, {} removed, {} errors",
+                            report.files_discovered, report.files_saved,
+                            report.files_removed, report.errors
+                        );
+                        if periodic_refresh_due || force_full_refresh {
+                            last_full_refresh = Instant::now();
+                        }
+                        for root in engine.index_roots().unwrap_or_default() {
+                            register_watch(&mut watcher, &root, &mut watched);
                         }
                     }
                     Err(_) => eprintln!("Automatic refresh skipped because the indexing lock was poisoned"),
                 }
+                pending_paths.clear();
                 pending = false;
+                force_full_refresh = false;
             }
         }
     });
