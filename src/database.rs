@@ -645,6 +645,66 @@ impl Database {
         Ok(())
     }
 
+    /// Atomically replace file content and media metadata for one batch.
+    /// If either write fails, neither side is committed.
+    pub fn replace_files_with_content_and_media_batch(
+        &self,
+        files: &[(FileRecord, Option<String>)],
+        entries: &[(std::path::PathBuf, Option<MediaMetadata>)],
+    ) -> Result<()> {
+        if files.is_empty() && entries.is_empty() {
+            return Ok(());
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        {
+            let mut statement = transaction.prepare(
+                "INSERT INTO files
+                    (path, name, extension, size_bytes, modified_unix, status, content)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(path) DO UPDATE SET
+                    name = excluded.name,
+                    extension = excluded.extension,
+                    size_bytes = excluded.size_bytes,
+                    modified_unix = excluded.modified_unix,
+                    status = excluded.status,
+                    content = excluded.content"
+            )?;
+            for (file, content) in files {
+                let path = file.path.to_string_lossy().to_string();
+                let size = file.size_bytes.min(i64::MAX as u64) as i64;
+                let modified = file.modified_timestamp_ns.map(|value| value.min(i64::MAX as u64) as i64);
+                let status = match &file.status {
+                    IndexingStatus::Pending => "pending",
+                    IndexingStatus::Indexing => "indexing",
+                    IndexingStatus::Indexed => "indexed",
+                    IndexingStatus::Skipped => "skipped",
+                    IndexingStatus::Failed => "failed",
+                };
+                statement.execute(params![
+                    path, file.name, file.extension, size, modified, status, content
+                ])?;
+            }
+        }
+        {
+            let mut delete = transaction.prepare(
+                "DELETE FROM media_metadata WHERE file_path = ?1"
+            )?;
+            let mut insert = transaction.prepare(
+                "INSERT INTO media_metadata(file_path, metadata_json) VALUES (?1, ?2)"
+            )?;
+            for (path, metadata) in entries {
+                let path = path.to_string_lossy().into_owned();
+                delete.execute([&path])?;
+                if let Some(metadata) = metadata {
+                    let json = serde_json::to_string(metadata)
+                        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+                    insert.execute(params![path, json])?;
+                }
+            }
+        }
+        transaction.commit()
+    }
+
     /// Returns true when size and modification time match the stored record.
     pub fn is_file_unchanged(&self, file: &FileRecord) -> Result<bool> {
         let path = file.path.to_string_lossy().to_string();
@@ -1584,6 +1644,27 @@ mod database_tests {
 
         assert_eq!(db.file_count().unwrap(), 2);
         assert_eq!(db.search_content("searchable").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn file_content_and_media_metadata_batch_roll_back_together() {
+        let db = Database::open(":memory:").unwrap();
+        let file = sample_file("atomic-video.mp4", 42);
+        db.connection.execute_batch(
+            "CREATE TRIGGER reject_media_metadata
+             BEFORE INSERT ON media_metadata
+             BEGIN SELECT RAISE(ABORT, 'forced metadata failure'); END;"
+        ).unwrap();
+        let metadata = MediaMetadata {
+            duration_ms: Some(1000),
+            ..Default::default()
+        };
+        let files = vec![(file.clone(), Some("new searchable content".to_string()))];
+        let media = vec![(file.path.clone(), Some(metadata))];
+
+        assert!(db.replace_files_with_content_and_media_batch(&files, &media).is_err());
+        assert_eq!(db.file_count().unwrap(), 0);
+        assert!(db.search_content("new searchable").unwrap().is_empty());
     }
 
     #[test]
