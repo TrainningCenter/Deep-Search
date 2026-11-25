@@ -267,7 +267,8 @@ impl DeepSearchApp {
         let mut changed = false;
         let mut move_request: Option<(usize, isize)> = None;
         let columns = &mut self.active_profile_mut().columns;
-        for index in 0..columns.len() {
+        let column_count = columns.len();
+        for index in 0..column_count {
             ui.horizontal(|ui| {
                 let column = &mut columns[index];
                 changed |= ui.checkbox(&mut column.visible, column.key.as_str()).changed();
@@ -446,7 +447,7 @@ fn format_modified(timestamp_ns: u64) -> String {
     let month_prime = (5 * day_of_year + 2) / 153;
     let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
     let month = month_prime + if month_prime < 10 { 3 } else { -9 };
-    year += i64::from(month <= 2);
+    if month <= 2 { year += 1; }
     let hour = day_seconds / 3_600;
     let minute = (day_seconds % 3_600) / 60;
     format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02} UTC")
