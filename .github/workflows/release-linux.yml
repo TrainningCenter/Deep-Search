@@ -6,7 +6,6 @@ on:
       - main
     paths:
       - "Cargo.toml"
-      - "Cargo.lock"
       - "src/**"
       - "packaging/linux/**"
       - ".github/workflows/release-linux.yml"
@@ -36,7 +35,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build engine and desktop application
-        run: cargo build --locked --release --features desktop --bins
+        run: cargo build --release --features desktop --bins
 
       - name: Assemble installable package
         shell: bash
