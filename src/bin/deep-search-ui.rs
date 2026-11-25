@@ -547,7 +547,10 @@ impl eframe::App for DeepSearchApp {
                 }
                 if let Some(enabled) = self.service_enabled {
                     let mut startup = enabled;
-                    if ui.checkbox(&mut startup, if self.arabic { "التشغيل تلقائيًا مع بدء النظام" } else { "Start automatically at boot" }).changed() {
+                    if ui.add_enabled(
+                        !self.service_busy,
+                        egui::Checkbox::new(&mut startup, if self.arabic { "التشغيل تلقائيًا مع بدء النظام" } else { "Start automatically at boot" }),
+                    ).changed() {
                         self.control_system_service(if startup { "enable" } else { "disable" });
                     }
                 } else {
