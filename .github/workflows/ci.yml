@@ -82,9 +82,9 @@ jobs:
           for attempt in range(30):
               try:
                   with socket.create_connection(("127.0.0.1", 14765), timeout=1) as connection:
-                      connection.sendall(b'{"command":"status"}\\n')
+                      connection.sendall(b'{"command":"status"}\n')
                       response = b""
-                      while not response.endswith(b"\\n"):
+                      while not response.endswith(b"\n"):
                           chunk = connection.recv(65536)
                           if not chunk:
                               raise RuntimeError("Docker service closed the status connection")
