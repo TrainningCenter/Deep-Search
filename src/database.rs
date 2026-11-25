@@ -1476,6 +1476,7 @@ mod database_tests {
             bit_rate: Some(2_500_000),
             sample_rate: Some(48_000),
             channels: Some(2),
+            ..Default::default()
         };
         db.replace_media_metadata_batch(&[(file.path.clone(), Some(metadata.clone()))]).unwrap();
         let results = db.search_by_name("sample-video").unwrap();
