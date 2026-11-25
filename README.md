@@ -158,11 +158,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 A system-wide systemd unit can start the engine at boot, before the selected user logs in, while running the process under that user's own Linux account (not root). Each user gets a separate database at `~/.local/share/deep-search/index.sqlite`.
 
-Build the release binary, then install and enable the service for the intended account:
+Extract the Linux package, open a terminal in the extracted directory, then install the desktop application and background service together:
 
 ```bash
-cargo build --release
-sudo packaging/linux/systemd/install-service.sh "$USER" ./target/release/deep-search
+sudo bash packaging/linux/install.sh "$USER"
+```
+
+The installer places both executables in `/usr/local/bin`, adds Deep-Search to the desktop application menu, and enables the systemd service for the selected non-root account. You can then launch Deep-Search from the application menu or run `deep-search-ui`.
+
+For a service-only installation (without the desktop launcher), use:
+
+```bash
+sudo bash packaging/linux/systemd/install-service.sh "$USER" ./deep-search
 ```
 
 Check or control the service with the installed helper:
