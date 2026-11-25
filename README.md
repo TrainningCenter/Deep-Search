@@ -22,7 +22,7 @@ The release workflow publishes a new alpha release after the Linux, Windows, mac
 If release publishing is denied after changing repository or organization Actions policies, check that the workflow is allowed to write repository contents and create releases. Never commit a personal access token or other secret to the repository.
 
 - Linux/macOS: `sha256sum -c deep-search-<platform>.sha256`
-- Windows PowerShell: compare `(Get-FileHash .\\deep-search-windows-x64.zip -Algorithm SHA256).Hash.ToLower()` with the hash in `deep-search-windows-x64.sha256`.
+- Windows PowerShell: compare `(Get-FileHash .\deep-search-windows-x64.zip -Algorithm SHA256).Hash.ToLower()` with the hash in `deep-search-windows-x64.sha256`.
 
 ## Install the desktop application and background service
 
@@ -46,7 +46,7 @@ Launch **Deep-Search** from the desktop application menu, or run `deep-search-ui
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\\packaging\\windows\\task-scheduler\\install-service.ps1 -UserName "$env:USERDOMAIN\\$env:USERNAME" -BinaryPath ".\\deep-search.exe"
+.\packaging\windows\task-scheduler\install-service.ps1 -UserName "$env:USERDOMAIN\$env:USERNAME" -BinaryPath ".\deep-search.exe"
 ```
 
 The installer copies both executables into Program Files, creates a Start Menu shortcut, and registers the background service to start at boot. By default, Windows S4U logon cannot access password-protected network shares. To enable authenticated UNC/NAS shares, add `-EnableAuthenticatedNetworkShares`; the installer will ask for the account password.
@@ -328,7 +328,7 @@ sudo bash packaging/macos/launchd/uninstall-service.sh
 The Windows package includes an elevated PowerShell installer. It registers a Task Scheduler task triggered at system startup, runs the engine under the selected account without requiring an interactive login, and restarts it after failure. When `deep-search-ui.exe` is beside the engine binary, it also installs the desktop application and creates a Start Menu shortcut:
 
 ```powershell
-.\\packaging\\windows\\task-scheduler\\install-service.ps1 -UserName $env:USERNAME -BinaryPath .\\deep-search.exe
+.\packaging\windows\task-scheduler\install-service.ps1 -UserName $env:USERNAME -BinaryPath .\deep-search.exe
 ```
 
 By default, the task uses an S4U logon and does not store the user's password; this supports local storage but cannot authenticate to protected network shares. To allow access to authenticated NAS/SMB shares through UNC paths, run the installer with `-EnableAuthenticatedNetworkShares`. It will request the account password and let Windows Task Scheduler protect the stored task credential. Use this only when needed and ensure the selected account has the required share and filesystem permissions.
@@ -336,17 +336,17 @@ By default, the task uses an S4U logon and does not store the user's password; t
 Manage the task from an elevated PowerShell session:
 
 ```powershell
-& "$env:ProgramFiles\\Deep-Search\\deep-search-service.ps1" status
-& "$env:ProgramFiles\\Deep-Search\\deep-search-service.ps1" start
-& "$env:ProgramFiles\\Deep-Search\\deep-search-service.ps1" stop
-& "$env:ProgramFiles\\Deep-Search\\deep-search-service.ps1" enable
-& "$env:ProgramFiles\\Deep-Search\\deep-search-service.ps1" disable
+& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" status
+& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" start
+& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" stop
+& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" enable
+& "$env:ProgramFiles\Deep-Search\deep-search-service.ps1" disable
 ```
 
 Remove the scheduled task and installed binaries while preserving the index database:
 
 ```powershell
-.\\packaging\\windows\\task-scheduler\\uninstall-service.ps1
+.\packaging\windows\task-scheduler\uninstall-service.ps1
 ```
 
 ## Query language
