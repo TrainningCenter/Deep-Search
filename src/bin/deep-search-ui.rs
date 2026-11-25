@@ -369,6 +369,7 @@ impl DeepSearchApp {
         ui.heading(if self.arabic { "إعدادات الأعمدة" } else { "Columns & layout" });
         let mut changed = false;
         let mut move_request: Option<(usize, isize)> = None;
+        let mut remove_request: Option<usize> = None;
         let arabic = self.arabic;
         let columns = &mut self.active_profile_mut().columns;
         let column_count = columns.len();
@@ -390,6 +391,18 @@ impl DeepSearchApp {
             let target = (index as isize + direction) as usize;
             columns.swap(index, target);
             changed = true;
+        }
+        if let Some(index) = remove_request {
+            columns.remove(index);
+            changed = true;
+        }
+        if ui.button(if arabic { "إضافة الأعمدة المتاحة" } else { "Add available columns" }).clicked() {
+            for candidate in default_columns() {
+                if !columns.iter().any(|existing| existing.key == candidate.key) {
+                    columns.push(candidate);
+                    changed = true;
+                }
+            }
         }
         let arabic = self.arabic;
         let row_height = &mut self.active_profile_mut().row_height;
