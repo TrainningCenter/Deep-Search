@@ -149,7 +149,9 @@ fn parse_duration(value: &str) -> Result<u64, String> {
         } else {
             numbers[0] * 3600.0 + numbers[1] * 60.0 + numbers[2]
         };
-        if numbers.last().is_some_and(|seconds| *seconds >= 60.0) && numbers.len() > 1 {
+        if numbers.len() == 2 && numbers[1] >= 60.0
+            || numbers.len() == 3 && (numbers[1] >= 60.0 || numbers[2] >= 60.0)
+        {
             return Err(format!("Invalid duration: {value}"));
         }
         let milliseconds = seconds * 1000.0;
