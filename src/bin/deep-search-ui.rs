@@ -1430,6 +1430,32 @@ fn configure_arabic_font(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+/// Convert logical Arabic text into shaped, visually ordered text for egui's
+/// left-to-right text renderer. Input values remain untouched for editing,
+/// indexing, sorting, and clipboard operations.
+fn display_text(text: impl AsRef<str>) -> String {
+    let text = text.as_ref();
+    if !text.chars().any(arabic::is_arabic_letter) {
+        return text.to_owned();
+    }
+
+    let mut visual = String::with_capacity(text.len());
+    for segment in text.split_inclusive('\\n') {
+        let (line, newline) = segment.strip_suffix('\\n')
+            .map(|line| (line, "\\n"))
+            .unwrap_or((segment, ""));
+        let shaped = arabic::reshape(line, arabic::Direction::Logical);
+        let bidi = unicode_bidi::BidiInfo::new(&shaped, None);
+        if let Some(paragraph) = bidi.paragraphs.first() {
+            visual.push_str(&bidi.reorder_line(paragraph, paragraph.range.clone()));
+        } else {
+            visual.push_str(&shaped);
+        }
+        visual.push_str(newline);
+    }
+    visual
+}
+
 fn show_notification(summary: &str, body: &str) {
     let summary = summary.to_owned();
     let body = body.to_owned();
@@ -1483,6 +1509,35 @@ fn format_size(bytes: u64) -> String {
         unit += 1;
     }
     if unit == 0 { format!("{bytes} B") } else { format!("{size:.1} {}", UNITS[unit]) }
+}
+
+#[cfg(test)]
+mod rtl_text_tests {
+    use super::display_text;
+
+    #[test]
+    fn arabic_display_text_shapes_letters_and_preserves_latin_runs() {
+        let logical = "السلام عليكم report 2026";
+        let visual = display_text(logical);
+        assert_ne!(visual, logical);
+        assert!(visual.contains("report"));
+        assert!(visual.contains("2026"));
+        assert!(visual.chars().any(|character| ('\\u{FE70}'..='\\u{FEFF}').contains(&character)));
+    }
+
+    #[test]
+    fn left_to_right_text_is_unchanged() {
+        let text = "Deep-Search report 2026";
+        assert_eq!(display_text(text), text);
+    }
+
+    #[test]
+    fn arabic_display_text_preserves_line_breaks() {
+        let text = "مرحبا\\nDeep-Search";
+        let visual = display_text(text);
+        assert!(visual.contains('\\n'));
+        assert!(visual.ends_with("Deep-Search"));
+    }
 }
 
 fn main() -> eframe::Result<()> {
