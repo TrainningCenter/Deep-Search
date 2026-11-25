@@ -47,6 +47,11 @@ if ($EnableAuthenticatedNetworkShares) {
         throw "A Windows account credential is required when -EnableAuthenticatedNetworkShares is selected."
     }
     $password = $credential.GetNetworkCredential().Password
+    $credentialGrant = "$($credential.UserName):(OI)(CI)M"
+    & icacls.exe $dataDirectory /grant:r $credentialGrant | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not grant the credential account access to the Deep-Search data directory."
+    }
     Register-ScheduledTask -TaskName "Deep-Search" -Action $taskAction -Trigger $taskTrigger -User $credential.UserName -Password $password -RunLevel Highest -Settings $taskSettings -Description "Deep-Search background indexing service" -Force | Out-Null
     Write-Host "Authenticated network-share access is enabled for the Deep-Search startup task."
 } else {
