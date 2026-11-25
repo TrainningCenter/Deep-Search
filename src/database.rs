@@ -213,6 +213,10 @@ impl Database {
                 PRIMARY KEY(session_id, path)
             );
 
+            CREATE TABLE IF NOT EXISTS index_roots (
+                path TEXT PRIMARY KEY
+            );
+
             ",
         )?;
 
@@ -514,6 +518,32 @@ impl Database {
 
         transaction.commit()?;
         Ok(deleted)
+    }
+
+    /// Persist indexing roots so the background watcher can restore them after restart.
+    pub fn add_index_roots<P: AsRef<Path>>(&self, roots: &[P]) -> Result<()> {
+        let transaction = self.connection.unchecked_transaction()?;
+        {
+            let mut statement = transaction.prepare(
+                "INSERT OR IGNORE INTO index_roots(path) VALUES (?1)"
+            )?;
+            for root in roots {
+                let path = root.as_ref().to_string_lossy().into_owned();
+                statement.execute(params![path])?;
+            }
+        }
+        transaction.commit()
+    }
+
+    pub fn index_roots(&self) -> Result<Vec<std::path::PathBuf>> {
+        let mut statement = self.connection.prepare(
+            "SELECT path FROM index_roots ORDER BY path"
+        )?;
+        let rows = statement.query_map([], |row| {
+            let path: String = row.get(0)?;
+            Ok(std::path::PathBuf::from(path))
+        })?;
+        rows.collect()
     }
 
     pub fn file_count(&self) -> Result<u64> {
