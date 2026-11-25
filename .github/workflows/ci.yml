@@ -62,20 +62,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ci-scan
-          printf 'Deep-Search Docker smoke test\\n' > ci-scan/docker-smoke.txt
+          printf 'Deep-Search Docker smoke test\n' > ci-scan/docker-smoke.txt
           docker volume create deep-search-ci-data >/dev/null
           cleanup() {
             docker rm -f deep-search-ci >/dev/null 2>&1 || true
             docker volume rm deep-search-ci-data >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          docker run --detach --name deep-search-ci \\
-            --publish 127.0.0.1:14765:4765 \\
-            --volume deep-search-ci-data:/data \\
-            --volume "$GITHUB_WORKSPACE/ci-scan:/scan:ro" \\
-            --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \\
-            --user 10001:10001 --cap-drop ALL \\
-            --security-opt no-new-privileges:true \\
+          docker run --detach --name deep-search-ci \
+            --publish 127.0.0.1:14765:4765 \
+            --volume deep-search-ci-data:/data \
+            --volume "$GITHUB_WORKSPACE/ci-scan:/scan:ro" \
+            --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --user 10001:10001 --cap-drop ALL \
+            --security-opt no-new-privileges:true \
             deep-search:ci
           python3 - <<'PY'
           import json
@@ -85,9 +85,9 @@ jobs:
           def request(payload, timeout=30):
               with socket.create_connection(("127.0.0.1", 14765), timeout=timeout) as connection:
                   connection.settimeout(timeout)
-                  connection.sendall(json.dumps(payload).encode("utf-8") + b"\\n")
+                  connection.sendall(json.dumps(payload).encode("utf-8") + b"\n")
                   response = b""
-                  while not response.endswith(b"\\n"):
+                  while not response.endswith(b"\n"):
                       chunk = connection.recv(65536)
                       if not chunk:
                           raise RuntimeError("Docker service closed the connection")
