@@ -286,6 +286,11 @@ impl DeepSearchApp {
                 let menu_sender = self.sender.clone();
                 let menu_ctx = ctx.clone();
                 MenuEvent::set_event_handler(Some(move |event| {
+                    // egui 0.31 does not run App::update for a hidden root
+                    // viewport. Restore it before dispatching the action so
+                    // quick controls are handled reliably on every platform.
+                    menu_ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    menu_ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                     let _ = menu_sender.send(UiMessage::TrayMenu(event.id.0));
                     menu_ctx.request_repaint();
                 }));
