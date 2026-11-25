@@ -61,43 +61,65 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p ci-scan
+          printf 'Deep-Search Docker smoke test\\n' > ci-scan/docker-smoke.txt
           docker volume create deep-search-ci-data >/dev/null
           cleanup() {
             docker rm -f deep-search-ci >/dev/null 2>&1 || true
             docker volume rm deep-search-ci-data >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          docker run --detach --name deep-search-ci \
-            --publish 127.0.0.1:14765:4765 \
-            --volume deep-search-ci-data:/data \
-            --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
-            --user 10001:10001 --cap-drop ALL \
-            --security-opt no-new-privileges:true \
+          docker run --detach --name deep-search-ci \\
+            --publish 127.0.0.1:14765:4765 \\
+            --volume deep-search-ci-data:/data \\
+            --volume "$GITHUB_WORKSPACE/ci-scan:/scan:ro" \\
+            --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \\
+            --user 10001:10001 --cap-drop ALL \\
+            --security-opt no-new-privileges:true \\
             deep-search:ci
           python3 - <<'PY'
           import json
           import socket
           import time
 
+          def request(payload, timeout=30):
+              with socket.create_connection(("127.0.0.1", 14765), timeout=timeout) as connection:
+                  connection.settimeout(timeout)
+                  connection.sendall(json.dumps(payload).encode("utf-8") + b"\\n")
+                  response = b""
+                  while not response.endswith(b"\\n"):
+                      chunk = connection.recv(65536)
+                      if not chunk:
+                          raise RuntimeError("Docker service closed the connection")
+                      response += chunk
+              return json.loads(response)
+
           for attempt in range(30):
               try:
-                  with socket.create_connection(("127.0.0.1", 14765), timeout=1) as connection:
-                      connection.sendall(b'{"command":"status"}\n')
-                      response = b""
-                      while not response.endswith(b"\n"):
-                          chunk = connection.recv(65536)
-                          if not chunk:
-                              raise RuntimeError("Docker service closed the status connection")
-                          response += chunk
-                  status = json.loads(response)
+                  status = request({"command": "status"}, timeout=1)
                   assert status.get("ok") is True, status
                   assert status.get("data", {}).get("version") == "0.1.0", status
-                  print("Docker service status:", status)
                   break
               except (OSError, RuntimeError):
                   if attempt == 29:
                       raise
                   time.sleep(1)
+
+          indexed = request({"command": "index", "paths": ["/scan"]}, timeout=60)
+          assert indexed.get("ok") is True, indexed
+          assert indexed.get("data", {}).get("files_saved", 0) >= 1, indexed
+
+          results = request({
+              "command": "search",
+              "query": "docker",
+              "limit": 10,
+              "offset": 0,
+              "sort": "name",
+              "order": "asc",
+          })
+          assert results.get("ok") is True, results
+          assert results.get("data", {}).get("total", 0) >= 1, results
+          print("Docker index and search smoke test passed:", indexed, results)
           PY
 
       - name: Check desktop application
