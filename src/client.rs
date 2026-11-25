@@ -232,7 +232,7 @@ mod tests {
                     "has_more": false
                 }
             })).unwrap();
-            stream.write_all(b"\\n").unwrap();
+            stream.write_all(b"\n").unwrap();
         });
 
         let mut progress = Vec::new();
