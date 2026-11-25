@@ -884,7 +884,7 @@ mod database_tests {
         db.upsert_file(&sample_file("zeta.txt", 30)).unwrap();
         db.upsert_file(&sample_file("alpha.pdf", 10)).unwrap();
         db.upsert_file(&sample_file("beta.txt", 20)).unwrap();
-        let expression = SearchExpression::Or(vec![]);
+        let expression = SearchExpression::NameContains(String::new());
 
         let by_size = db.search_page_sorted(
             &expression, 10, 0, SearchSortField::Size, SearchSortDirection::Descending,
