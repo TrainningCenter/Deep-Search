@@ -1,6 +1,7 @@
 
 use crate::{FileRecord, IndexingStatus};
-use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension, Result};
+use rusqlite::{params, params_from_iter, types::Value, Connection, OpenFlags, OptionalExtension, Result};
+use std::time::Duration;
 use serde::Serialize;
 use std::path::Path;
 
@@ -172,9 +173,22 @@ pub struct Database {
 impl Database {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let connection = Connection::open(path)?;
+        connection.busy_timeout(Duration::from_secs(30))?;
         let database = Self { connection };
         database.initialize()?;
         Ok(database)
+    }
+
+    /// Open an already initialized database without running schema migrations.
+    /// The service uses one connection per client so searches can run concurrently.
+    pub fn connect_existing<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let connection = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_FULL_MUTEX,
+        )?;
+        connection.busy_timeout(Duration::from_secs(30))?;
+        connection.execute_batch("PRAGMA foreign_keys = ON;")?;
+        Ok(Self { connection })
     }
 
     pub fn initialize(&self) -> Result<()> {
