@@ -1,8 +1,8 @@
 [Unit]
 Description=Deep-Search background engine for user %i
 Documentation=https://github.com/TrainningCenter/Deep-Search
-After=local-fs.target
-Wants=local-fs.target
+After=local-fs.target network-online.target remote-fs.target
+Wants=local-fs.target network-online.target remote-fs.target
 
 [Service]
 Type=simple
