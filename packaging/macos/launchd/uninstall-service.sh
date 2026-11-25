@@ -6,4 +6,5 @@ plist="/Library/LaunchDaemons/$label.plist"
 launchctl disable "system/$label" >/dev/null 2>&1 || true
 launchctl bootout system "$plist" >/dev/null 2>&1 || true
 rm -f "$plist" /usr/local/bin/deep-search-service
+rm -rf /Applications/Deep-Search.app
 echo "Deep-Search launchd service removed. The index database and engine binary were preserved."
