@@ -76,6 +76,35 @@ Show the number of indexed files:
 deep-search count index.sqlite
 ```
 
+## Local background service (early)
+
+The engine can now run as a persistent local service. It accepts one JSON request per TCP connection, with one JSON response line. By default it binds only to `127.0.0.1:4765`; this keeps the initial service local to the machine.
+
+Start it:
+
+```bash
+deep-search serve index.sqlite
+```
+
+You can override the bind address explicitly:
+
+```bash
+deep-search serve index.sqlite 127.0.0.1:4765
+```
+
+Available request examples (send each as a single line):
+
+```json
+{"command":"status"}
+{"command":"index","paths":["/home/user/Documents","/mnt/storage"]}
+{"command":"search","query":"type:video AND (ext:mkv OR ext:mp4)"}
+{"command":"content","term":"quarterly revenue"}
+```
+
+The service currently supports `status`, `index`, `search` (up to 100 results), and `content`. Responses contain `ok: true` and a `data` object on success, or `ok: false` and an `error` string on failure.
+
+**Security and lifecycle:** this first service milestone is loopback-only by default and has no authentication, TLS, remote/NAS transport, OS service registration, boot startup, or tray integration yet. Do not expose it to a network or bind it to a non-loopback address on an untrusted network. OS-managed startup and permissions are planned as a separate milestone.
+
 ## Query language
 
 | Condition | Meaning | Example |
