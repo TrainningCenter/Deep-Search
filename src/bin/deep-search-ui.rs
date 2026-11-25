@@ -123,6 +123,7 @@ struct DeepSearchApp {
     service_detail: String,
     service_busy: bool,
     service_checked: bool,
+    dragged_column: Option<usize>,
 }
 
 impl Default for DeepSearchApp {
@@ -150,6 +151,7 @@ impl Default for DeepSearchApp {
             service_detail: "Checking system service status…".to_owned(),
             service_busy: false,
             service_checked: false,
+            dragged_column: None,
         }
     }
 }
@@ -370,11 +372,17 @@ impl DeepSearchApp {
         let mut changed = false;
         let mut move_request: Option<(usize, isize)> = None;
         let mut remove_request: Option<usize> = None;
+        let mut drag_started: Option<usize> = None;
+        let mut hovered_target: Option<usize> = None;
+        let pointer_released = ui.input(|input| input.pointer.any_released());
+        let is_dragging = self.dragged_column.is_some();
         let arabic = self.arabic;
         let columns = &mut self.active_profile_mut().columns;
         let column_count = columns.len();
         for index in 0..column_count {
-            ui.horizontal(|ui| {
+            let row = ui.horizontal(|ui| {
+                let handle = ui.add(egui::Label::new("⠿").sense(egui::Sense::drag()));
+                if handle.drag_started() { drag_started = Some(index); }
                 let column = &mut columns[index];
                 let label = column_label(&column.key, arabic);
                 changed |= ui.checkbox(&mut column.visible, label).changed();
@@ -389,6 +397,19 @@ impl DeepSearchApp {
                     remove_request = Some(index);
                 }
             });
+            if is_dragging && row.response.hovered() { hovered_target = Some(index); }
+        }
+        if let Some(index) = drag_started { self.dragged_column = Some(index); }
+        if pointer_released {
+            if let (Some(source), Some(target)) = (self.dragged_column.take(), hovered_target) {
+                if source != target && source < columns.len() {
+                    let moved = columns.remove(source);
+                    columns.insert(target.min(columns.len()), moved);
+                    changed = true;
+                }
+            } else {
+                self.dragged_column = None;
+            }
         }
         if let Some((index, direction)) = move_request {
             let target = (index as isize + direction) as usize;
