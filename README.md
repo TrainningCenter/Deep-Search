@@ -39,11 +39,19 @@ The Docker image runs the indexing/search engine without a desktop window. Keep 
 
 1. Download the repository source ZIP from GitHub and extract it.
 2. Create a `scan` folder beside `Dockerfile` and `compose.yaml`, or edit the bind mount in `compose.yaml` to point directly to a mounted NAS/network share.
-3. From that directory, start the service:
+3. For a prebuilt Linux x64 image, download the `deep-search-docker-linux-x64` artifact from the Alpha Builds workflow, extract it, and load the image:
 
 ```bash
-docker compose up -d --build
+docker load -i deep-search-docker-linux-x64.tar
 ```
+
+4. From the source directory, start the prebuilt image:
+
+```bash
+docker compose up -d
+```
+
+To build the image locally instead, use `docker compose up -d --build`.
 
 The Compose file binds the service to `127.0.0.1:4765` only, stores the index in a persistent Docker volume, and mounts `./scan` read-only at `/scan`. In the desktop application's indexing-path field, enter `/scan`. For a NAS mount, replace `./scan:/scan:ro` with the host mount, for example `/mnt/nas:/scan:ro`.
 
