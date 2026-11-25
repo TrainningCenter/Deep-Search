@@ -177,16 +177,12 @@ impl SearchEngine {
                     media_batch.push((file.path.clone(), media));
                     content_batch.push((file, content));
                 }
-                match self.database.replace_files_with_content_batch(&content_batch) {
-                    Ok(()) => match self.database.replace_media_metadata_batch(&media_batch) {
-                        Ok(()) => report.files_saved += saved,
-                        Err(_) => {
-                            report.errors += 1;
-                            indexing_failed = true;
-                        }
-                    },
+                match self.database.replace_files_with_content_and_media_batch(
+                    &content_batch, &media_batch,
+                ) {
+                    Ok(()) => report.files_saved += saved,
                     Err(_) => {
-                        report.errors += saved;
+                        report.errors += saved.max(1);
                         indexing_failed = true;
                     }
                 }
