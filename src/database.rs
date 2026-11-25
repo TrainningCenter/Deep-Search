@@ -11,6 +11,21 @@ pub struct SearchResult {
     pub size_bytes: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchSortField {
+    Relevance,
+    Name,
+    Path,
+    Extension,
+    Size,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchSortDirection {
+    Ascending,
+    Descending,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchExpression {
     NameContains(String),
@@ -538,15 +553,48 @@ impl Database {
         limit: u32,
         offset: u64,
     ) -> Result<Vec<SearchResult>> {
+        self.search_page_sorted(
+            expression,
+            limit,
+            offset,
+            SearchSortField::Relevance,
+            SearchSortDirection::Ascending,
+        )
+    }
+
+    /// Return a bounded page using a caller-selected, deterministic sort order.
+    pub fn search_page_sorted(
+        &self,
+        expression: &SearchExpression,
+        limit: u32,
+        offset: u64,
+        sort_field: SearchSortField,
+        sort_direction: SearchSortDirection,
+    ) -> Result<Vec<SearchResult>> {
         let mut values = Vec::new();
         let condition = compile_expression(expression, &mut values);
-        let relevance = name_relevance_order(expression, &mut values);
+        let order_by = match sort_field {
+            SearchSortField::Relevance => name_relevance_order(expression, &mut values),
+            SearchSortField::Name => "name COLLATE NOCASE".to_string(),
+            SearchSortField::Path => "path COLLATE NOCASE".to_string(),
+            SearchSortField::Extension => "extension COLLATE NOCASE".to_string(),
+            SearchSortField::Size => "size_bytes".to_string(),
+        };
+        let direction = match sort_direction {
+            SearchSortDirection::Ascending => "ASC",
+            SearchSortDirection::Descending => "DESC",
+        };
+        let order_by = if sort_field == SearchSortField::Relevance {
+            format!("{order_by}, name COLLATE NOCASE, path COLLATE NOCASE")
+        } else {
+            format!("{order_by} {direction}, name COLLATE NOCASE, path COLLATE NOCASE")
+        };
         values.push(Value::Integer(limit.clamp(1, 1000) as i64));
         values.push(Value::Integer(offset.min(i64::MAX as u64) as i64));
         let sql = format!(
             "SELECT path, name, extension, size_bytes FROM files
              WHERE {condition}
-             ORDER BY {relevance}, name COLLATE NOCASE, path COLLATE NOCASE
+             ORDER BY {order_by}
              LIMIT ?{} OFFSET ?{}",
             values.len() - 1,
             values.len()
@@ -828,6 +876,39 @@ mod database_tests {
         );
         assert!(db.search_page(&expression, 0, 0).unwrap().len() <= 1);
         assert!(db.search_page(&expression, 5000, 0).unwrap().len() <= 3);
+    }
+
+    #[test]
+    fn supports_custom_sorting_for_paginated_search_results() {
+        let db = Database::open(":memory:").unwrap();
+        db.upsert_file(&sample_file("zeta.txt", 30)).unwrap();
+        db.upsert_file(&sample_file("alpha.pdf", 10)).unwrap();
+        db.upsert_file(&sample_file("beta.txt", 20)).unwrap();
+        let expression = SearchExpression::Or(vec![]);
+
+        let by_size = db.search_page_sorted(
+            &expression, 10, 0, SearchSortField::Size, SearchSortDirection::Descending,
+        ).unwrap();
+        assert_eq!(
+            by_size.iter().map(|file| file.size_bytes).collect::<Vec<_>>(),
+            vec![30, 20, 10],
+        );
+
+        let by_extension = db.search_page_sorted(
+            &expression, 10, 0, SearchSortField::Extension, SearchSortDirection::Ascending,
+        ).unwrap();
+        assert_eq!(
+            by_extension.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(),
+            vec!["alpha.pdf", "beta.txt", "zeta.txt"],
+        );
+
+        let by_name = db.search_page_sorted(
+            &expression, 10, 0, SearchSortField::Name, SearchSortDirection::Descending,
+        ).unwrap();
+        assert_eq!(
+            by_name.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(),
+            vec!["zeta.txt", "beta.txt", "alpha.pdf"],
+        );
     }
 
     #[test]
