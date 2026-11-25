@@ -1440,9 +1440,9 @@ fn display_text(text: impl AsRef<str>) -> String {
     }
 
     let mut visual = String::with_capacity(text.len());
-    for segment in text.split_inclusive('\\n') {
-        let (line, newline) = segment.strip_suffix('\\n')
-            .map(|line| (line, "\\n"))
+    for segment in text.split_inclusive('\n') {
+        let (line, newline) = segment.strip_suffix('\n')
+            .map(|line| (line, "\n"))
             .unwrap_or((segment, ""));
         let shaped = arabic::reshape(line, arabic::Direction::Logical);
         let bidi = unicode_bidi::BidiInfo::new(&shaped, None);
@@ -1522,7 +1522,7 @@ mod rtl_text_tests {
         assert_ne!(visual, logical);
         assert!(visual.contains("report"));
         assert!(visual.contains("2026"));
-        assert!(visual.chars().any(|character| ('\\u{FE70}'..='\\u{FEFF}').contains(&character)));
+        assert!(visual.chars().any(|character| ('\u{FE70}'..='\u{FEFF}').contains(&character)));
     }
 
     #[test]
@@ -1533,9 +1533,9 @@ mod rtl_text_tests {
 
     #[test]
     fn arabic_display_text_preserves_line_breaks() {
-        let text = "مرحبا\\nDeep-Search";
+        let text = "مرحبا\nDeep-Search";
         let visual = display_text(text);
-        assert!(visual.contains('\\n'));
+        assert!(visual.contains('\n'));
         assert!(visual.ends_with("Deep-Search"));
     }
 }
