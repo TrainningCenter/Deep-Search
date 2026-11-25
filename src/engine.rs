@@ -360,6 +360,37 @@ mod content_indexing_tests {
     }
 
     #[test]
+    fn opens_independent_connections_for_concurrent_service_clients() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "deep-search-multi-client-{}-{unique}", std::process::id()
+        ));
+        let root = base.join("files");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("shared.txt"), b"concurrent readers").unwrap();
+        let database_path = base.join("index.sqlite");
+
+        let engine = SearchEngine::open(&database_path).unwrap();
+        let indexed = engine.index_paths(&[root.as_path()]);
+        assert_eq!(indexed.errors, 0);
+        assert_eq!(indexed.files_saved, 1);
+        drop(engine);
+
+        let mut readers = Vec::new();
+        for _ in 0..4 {
+            let path = database_path.clone();
+            readers.push(std::thread::spawn(move || {
+                let client = SearchEngine::connect_existing(path).unwrap();
+                assert_eq!(client.indexed_file_count().unwrap(), 1);
+                assert_eq!(client.search_by_name("shared").unwrap().len(), 1);
+            }));
+        }
+        for reader in readers { reader.join().unwrap(); }
+
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
     fn refreshes_a_changed_file_and_removes_deleted_paths() {
         let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         let base = std::env::temp_dir().join(format!(
