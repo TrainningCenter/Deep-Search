@@ -732,8 +732,19 @@ mod tests {
         assert_eq!(response["ok"], true);
         assert_eq!(response["data"]["indexed_files"], 0);
         assert_eq!(response["data"]["stop_on_logout"], false);
+        assert_eq!(response["data"]["indexing_paused"], false);
         assert!(response["data"]["logout_detection_available"].is_boolean());
         assert_eq!(response["data"]["version"], crate::VERSION);
+
+        let paused = handle_request(r#"{"command":"pause_indexing"}"#, &engine);
+        assert_eq!(paused["ok"], true);
+        assert_eq!(paused["data"]["indexing_paused"], true);
+        let paused_status = handle_request(r#"{"command":"status"}"#, &engine);
+        assert_eq!(paused_status["data"]["indexing_paused"], true);
+
+        let resumed = handle_request(r#"{"command":"resume_indexing"}"#, &engine);
+        assert_eq!(resumed["ok"], true);
+        assert_eq!(resumed["data"]["indexing_paused"], false);
 
         let updated = handle_request(
             r#"{"command":"set_stop_on_logout","enabled":true}"#,
