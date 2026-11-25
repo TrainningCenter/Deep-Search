@@ -1,5 +1,5 @@
 use crate::database::{SearchSortDirection, SearchSortField};
-use crate::engine::SearchEngine;
+use crate::engine::{IndexingReport, SearchEngine};
 use crate::query::parse_query;
 use serde_json::{json, Value};
 use std::error::Error;
