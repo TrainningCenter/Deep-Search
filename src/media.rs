@@ -287,7 +287,6 @@ mod tests {
         assert_eq!(metadata.video_codec.as_deref(), Some("h264"));
         assert_eq!(metadata.camera_model, None);
     }
-    use super::*;
 
     #[test]
     fn parses_ffprobe_video_and_audio_stream_metadata() {
