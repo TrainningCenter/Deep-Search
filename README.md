@@ -8,7 +8,7 @@ A fast, lightweight, cross-platform file indexing and search engine written in R
 - SQLite-backed metadata storage and full-text content search (FTS5).
 - Search by file name, path, content, extension, file category, and size range.
 - Boolean search expressions with `AND`, `OR`, `NOT`, and parentheses.
-- Paginated search with total-match counts.
+- Search returns every matching file, with total-match counts and bounded batches for efficient transfer; pagination is an internal transport detail, not a cap on total results.
 - Deterministic sorting by relevance, name, path, extension, size, or modification time.
 - Extracts searchable text from common text files, PDF, RTF, DOCX, ODT, PPTX, and XLSX.
 - Reconciles deleted files after a completed scan while preserving records when a scan fails or a source is unavailable.
@@ -101,7 +101,7 @@ Available request examples (send each as a single line):
 {"command":"content","term":"quarterly revenue"}
 ```
 
-The service currently supports `status`, `index`, `search`, and `content`. Search accepts optional `limit` (1–1000, default 100), `offset` (default 0), `sort` (`relevance`, `name`, `path`, `extension`, `size`, or `modified`), and `order` (`asc` or `desc`). The response includes `results`, `total`, `limit`, `offset`, and `has_more`. Responses contain `ok: true` and a `data` object on success, or `ok: false` and an `error` string on failure.
+The service currently supports `status`, `index`, `search`, and `content`. Search accepts optional `limit` (1–1000 results per transport batch, default 100), `offset` (default 0), `sort` (`relevance`, `name`, `path`, `extension`, `size`, or `modified`), and `order` (`asc` or `desc`). **There is no maximum total number of search matches:** clients retrieve subsequent batches by increasing `offset` until `has_more` is false. The desktop interface will combine those batches into one continuous results table; users will not navigate pages or lose results because of the batch size. The response includes `results`, `total`, `limit`, `offset`, and `has_more`. Responses contain `ok: true` and a `data` object on success, or `ok: false` and an `error` string on failure.
 
 **Security and lifecycle:** the service is loopback-only by default and has no authentication, TLS, or remote/NAS transport. Do not expose it to an untrusted network. Linux systemd boot startup is available; tray integration and Windows/macOS service installers remain future work.
 
