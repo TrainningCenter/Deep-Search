@@ -1329,4 +1329,32 @@ mod database_tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].size_bytes, 5000);
     }
+    #[test]
+    fn persists_unique_index_roots() {
+        let db = Database::open(":memory:").unwrap();
+        let roots = vec![PathBuf::from("/data/videos"), PathBuf::from("/data/documents")];
+        db.add_index_roots(&roots).unwrap();
+        db.add_index_roots(&roots).unwrap();
+        assert_eq!(db.index_roots().unwrap(), roots);
+    }
+
+    #[test]
+    fn removes_a_deleted_directory_subtree_without_touching_siblings() {
+        let db = Database::open(":memory:").unwrap();
+        let mut first = sample_file("first.txt", 1);
+        first.path = PathBuf::from("/data/folder/first.txt");
+        let mut nested = sample_file("nested.txt", 2);
+        nested.path = PathBuf::from("/data/folder/nested/nested.txt");
+        let mut sibling = sample_file("sibling.txt", 3);
+        sibling.path = PathBuf::from("/data/other/sibling.txt");
+        db.upsert_file(&first).unwrap();
+        db.upsert_file(&nested).unwrap();
+        db.upsert_file(&sibling).unwrap();
+
+        assert_eq!(db.remove_path_tree("/data/folder").unwrap(), 2);
+        assert!(db.search_by_name("first").unwrap().is_empty());
+        assert!(db.search_by_name("nested").unwrap().is_empty());
+        assert_eq!(db.search_by_name("sibling").unwrap().len(), 1);
+    }
+
 }
