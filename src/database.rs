@@ -1420,6 +1420,16 @@ mod database_tests {
     }
 
     #[test]
+    fn archive_category_includes_zip_family_containers() {
+        let db = Database::open(":memory:").unwrap();
+        for name in ["files.zip", "files.jar", "book.epub", "comic.cbz", "package.apk"] {
+            db.upsert_file(&sample_file(name, 10)).unwrap();
+        }
+        let results = db.search(&SearchExpression::FileType("archive".into())).unwrap();
+        assert_eq!(results.len(), 5);
+    }
+
+    #[test]
     fn video_category_includes_common_formats_but_excludes_camera_recording_formats() {
         let db = Database::open(":memory:").unwrap();
         for name in [

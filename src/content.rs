@@ -778,6 +778,33 @@ mod tests {
     }
 
     #[test]
+    fn malformed_nested_archives_do_not_hide_other_archive_contents() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(cursor);
+        writer.start_file("broken.zip", SimpleFileOptions::default()).unwrap();
+        writer.write_all(b"not a zip archive").unwrap();
+        writer.start_file("valid.txt", SimpleFileOptions::default()).unwrap();
+        writer.write_all(b"valid sibling archive content").unwrap();
+        let bytes = writer.finish().unwrap().into_inner();
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "deep-search-broken-nested-archive-{}-{unique}.zip",
+            std::process::id()
+        ));
+        fs::write(&path, &bytes).unwrap();
+        let text = extract_text(&path, bytes.len() as u64).unwrap();
+        assert!(text.contains("valid sibling archive content"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn extracts_text_from_powerpoint_slides_and_excel_workbooks() {
         use std::io::Write;
         use zip::write::SimpleFileOptions;
