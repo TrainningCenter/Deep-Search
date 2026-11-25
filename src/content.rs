@@ -221,6 +221,63 @@ fn extract_rtf_text(rtf: &str) -> Option<String> {
     limit_text(output)
 }
 
+/// Extract dialogue from SubRip (.srt) and WebVTT (.vtt) subtitle files,
+/// ignoring cue numbers, timestamps, and WebVTT metadata blocks.
+fn extract_subtitle_text(content: &str) -> Option<String> {
+    let mut output = String::new();
+    let mut skip_metadata_block = false;
+
+    for raw_line in content.trim_start_matches('\u{feff}').lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            skip_metadata_block = false;
+            continue;
+        }
+
+        let upper = line.to_ascii_uppercase();
+        if upper == "WEBVTT" || upper.starts_with("WEBVTT ") {
+            continue;
+        }
+        if upper == "NOTE" || upper.starts_with("NOTE ")
+            || upper == "STYLE" || upper == "REGION"
+        {
+            skip_metadata_block = true;
+            continue;
+        }
+        if skip_metadata_block || line.contains("-->") {
+            continue;
+        }
+        if line.chars().all(|ch| ch.is_ascii_digit()) {
+            continue;
+        }
+
+        // Remove inline WebVTT/HTML cue markup while preserving its text.
+        let mut plain = String::with_capacity(line.len());
+        let mut in_tag = false;
+        for ch in line.chars() {
+            match ch {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                _ if !in_tag => plain.push(ch),
+                _ => {}
+            }
+        }
+        let plain = plain.trim();
+        if plain.is_empty() {
+            continue;
+        }
+        if !output.is_empty() {
+            output.push(' ');
+        }
+        output.push_str(plain);
+        if output.len() >= MAX_EXTRACTED_TEXT_SIZE {
+            break;
+        }
+    }
+
+    limit_text(output)
+}
+
 fn extract_xml_text(xml: &str) -> Option<String> {
     let document = roxmltree::Document::parse(xml).ok()?;
     let mut output = String::new();
@@ -355,6 +412,13 @@ pub fn extract_text(path: &Path, size_bytes: u64) -> Option<String> {
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
 
     match extension.as_str() {
+        "srt" | "vtt" => {
+            if size_bytes > MAX_PLAIN_TEXT_SIZE {
+                return None;
+            }
+            let content = fs::read_to_string(path).ok()?;
+            extract_subtitle_text(&content)
+        }
         "txt" | "md" | "markdown" | "log" | "csv" | "tsv" |
         "json" | "jsonl" | "xml" | "html" | "htm" | "css" |
         "js" | "jsx" | "ts" | "tsx" | "rs" | "toml" |
@@ -416,6 +480,19 @@ pub fn extract_text(path: &Path, size_bytes: u64) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extracts_dialogue_from_srt_and_webvtt_subtitles() {
+        let srt = "\\u{feff}1\\r\\n00:00:01,000 --> 00:00:03,000\\r\\nHello <i>world</i>\\r\\n\\r\\n2\\r\\n00:00:04,000 --> 00:00:05,000\\r\\nمرحبا بالعالم\\r\\n";
+        let text = extract_subtitle_text(srt).unwrap();
+        assert!(text.contains("Hello world"));
+        assert!(text.contains("مرحبا بالعالم"));
+        assert!(!text.contains("00:00:01"));
+
+        let vtt = "WEBVTT\\n\\nNOTE generated metadata\\nnot dialogue\\n\\n00:00:01.000 --> 00:00:02.000 align:start\\n<v Speaker>Searchable subtitle</v>\\n";
+        let text = extract_subtitle_text(vtt).unwrap();
+        assert_eq!(text, "Searchable subtitle");
+    }
 
     #[test]
     fn extracts_text_from_xml_document_nodes() {
@@ -527,6 +604,23 @@ Escaped: \{literal\} and \~ space.}"#;
         assert!(text.contains("{literal}"));
         assert!(text.contains("HiddenGenerator") == false);
         assert!(text.contains("Arial") == false);
+    }
+
+    #[test]
+    fn indexes_subtitle_files_as_searchable_content() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "deep-search-subtitle-{}-{unique}.srt",
+            std::process::id()
+        ));
+        fs::write(&path, "1\\n00:00:01,000 --> 00:00:02,000\\nQuarterly planning meeting\\n").unwrap();
+        let size = fs::metadata(&path).unwrap().len();
+        let text = extract_text(&path, size).unwrap();
+        assert!(text.contains("Quarterly planning meeting"));
+        fs::remove_file(path).unwrap();
     }
 
     #[test]

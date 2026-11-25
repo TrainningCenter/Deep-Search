@@ -128,7 +128,7 @@ The desktop alpha currently provides automatic connection to the local service o
 - Boolean search expressions with `AND`, `OR`, `NOT`, and parentheses.
 - Search returns every matching file, with total-match counts and bounded batches for efficient transfer; pagination is an internal transport detail, not a cap on total results.
 - Deterministic sorting by relevance, name, path, extension, size, or modification time.
-- Extracts searchable text from common text files, PDF, RTF, DOCX, ODT, PPTX, and XLSX.
+- Extracts searchable text from common text files, PDF, RTF, DOCX, ODT, PPTX, XLSX, SubRip (SRT), and WebVTT subtitles, so spoken dialogue can be found through full-text search.
 - Extracts optional audio/video technical metadata through `ffprobe`: duration, container, codecs, resolution, frame rate, bit rate, sample rate, and channel count. The Docker image includes FFmpeg/ffprobe; native desktop installs need `ffprobe` available on `PATH` or configured through `DEEP_SEARCH_FFPROBE`. Media probing is best-effort and never blocks normal file indexing.
 - Reconciles deleted files after a completed scan while preserving records when a scan fails or a source is unavailable.
 
