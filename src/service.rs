@@ -87,30 +87,45 @@ fn spawn_logout_monitor(database_path: PathBuf, shutdown: mpsc::Sender<()>) {
 
         loop {
             match engine.stop_on_logout() {
-                Ok(false) => {
-                    session_seen = false;
-                    consecutive_empty_checks = 0;
+                Ok(enabled) => {
+                    let (next_seen, next_empty, should_stop) = logout_state_transition(
+                        enabled,
+                        session_seen,
+                        consecutive_empty_checks,
+                        if enabled { current_user_session_state() } else { Some(false) },
+                    );
+                    session_seen = next_seen;
+                    consecutive_empty_checks = next_empty;
+                    if should_stop {
+                        let _ = shutdown.send(());
+                        break;
+                    }
                 }
-                Ok(true) => match current_user_session_state() {
-                    Some(true) => {
-                        session_seen = true;
-                        consecutive_empty_checks = 0;
-                    }
-                    Some(false) if session_seen => {
-                        consecutive_empty_checks = consecutive_empty_checks.saturating_add(1);
-                        if consecutive_empty_checks >= 2 {
-                            let _ = shutdown.send(());
-                            break;
-                        }
-                    }
-                    Some(false) => consecutive_empty_checks = 0,
-                    None => consecutive_empty_checks = 0,
-                },
                 Err(error) => eprintln!("Could not read logout preference: {error}"),
             }
             thread::sleep(Duration::from_secs(5));
         }
     });
+}
+
+fn logout_state_transition(
+    stop_on_logout: bool,
+    session_seen: bool,
+    consecutive_empty_checks: u8,
+    current_session: Option<bool>,
+) -> (bool, u8, bool) {
+    if !stop_on_logout {
+        return (false, 0, false);
+    }
+    match current_session {
+        Some(true) => (true, 0, false),
+        Some(false) if session_seen => {
+            let empty_checks = consecutive_empty_checks.saturating_add(1);
+            (true, empty_checks, empty_checks >= 2)
+        }
+        Some(false) => (false, 0, false),
+        None => (session_seen, 0, false),
+    }
 }
 
 /// Returns Some(true/false) when the current account's interactive sessions can
@@ -486,6 +501,60 @@ fn handle_request_with_context(
     match result {
         Ok(data) => json!({"ok": true, "data": data}),
         Err(error) => json!({"ok": false, "error": error.to_string()}),
+    }
+}
+
+#[cfg(test)]
+mod logout_monitor_tests {
+    use super::logout_state_transition;
+
+    #[test]
+    fn does_not_stop_before_the_first_login_session() {
+        let (seen, empty, stop) = logout_state_transition(true, false, 0, Some(false));
+        assert!(!seen);
+        assert_eq!(empty, 0);
+        assert!(!stop);
+    }
+
+    #[test]
+    fn stops_only_after_two_empty_checks_following_a_session() {
+        let (seen, empty, stop) = logout_state_transition(true, false, 0, Some(true));
+        assert!(seen);
+        assert_eq!(empty, 0);
+        assert!(!stop);
+
+        let (seen, empty, stop) = logout_state_transition(true, seen, empty, Some(false));
+        assert!(seen);
+        assert_eq!(empty, 1);
+        assert!(!stop);
+
+        let (_, empty, stop) = logout_state_transition(true, seen, empty, Some(false));
+        assert_eq!(empty, 2);
+        assert!(stop);
+    }
+
+    #[test]
+    fn a_new_session_cancels_pending_logout() {
+        let (seen, empty, stop) = logout_state_transition(true, true, 1, Some(true));
+        assert!(seen);
+        assert_eq!(empty, 0);
+        assert!(!stop);
+    }
+
+    #[test]
+    fn disabled_logout_setting_never_stops_the_service() {
+        let (seen, empty, stop) = logout_state_transition(false, true, 1, Some(false));
+        assert!(!seen);
+        assert_eq!(empty, 0);
+        assert!(!stop);
+    }
+
+    #[test]
+    fn unknown_session_state_never_causes_shutdown() {
+        let (seen, empty, stop) = logout_state_transition(true, true, 1, None);
+        assert!(seen);
+        assert_eq!(empty, 0);
+        assert!(!stop);
     }
 }
 
