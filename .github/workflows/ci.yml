@@ -90,7 +90,8 @@ jobs:
                               raise RuntimeError("Docker service closed the status connection")
                           response += chunk
                   status = json.loads(response)
-                  assert "version" in status, status
+                  assert status.get("ok") is True, status
+                  assert status.get("data", {}).get("version") == "0.1.0", status
                   print("Docker service status:", status)
                   break
               except (OSError, RuntimeError):
