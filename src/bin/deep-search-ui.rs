@@ -19,6 +19,7 @@ enum UiMessage {
     ServiceAction { action: String, success: bool, detail: String },
     ServiceLogoutSetting { enabled: bool, success: bool, detail: String },
     IndexingPause { paused: bool, success: bool, detail: String },
+    TrayMenu(String),
     PickedPaths(Vec<String>),
 }
 
@@ -225,7 +226,7 @@ impl DeepSearchApp {
         ServiceClient::new(self.service_address.trim().to_owned())
     }
 
-    fn create_tray_icon(&mut self) {
+    fn create_tray_icon(&mut self, ctx: &egui::Context) {
         if self.tray_checked || !self.settings.tray_enabled {
             return;
         }
@@ -259,56 +260,42 @@ impl DeepSearchApp {
             .with_icon(icon)
             .build()
         {
-            Ok(icon) => self.tray_icon = Some(icon),
+            Ok(icon) => {
+                self.tray_icon = Some(icon);
+
+                // Forward tray callbacks through the egui context so the native
+                // event loop wakes even when the main window is hidden.
+                let tray_ctx = ctx.clone();
+                TrayIconEvent::set_event_handler(Some(move |event| {
+                    if matches!(event,
+                        TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } | TrayIconEvent::DoubleClick {
+                            button: MouseButton::Left,
+                            ..
+                        }
+                    ) {
+                        tray_ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        tray_ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    }
+                    tray_ctx.request_repaint();
+                }));
+
+                let menu_sender = self.sender.clone();
+                let menu_ctx = ctx.clone();
+                MenuEvent::set_event_handler(Some(move |event| {
+                    let _ = menu_sender.send(UiMessage::TrayMenu(event.id.0));
+                    menu_ctx.request_repaint();
+                }));
+            }
             Err(error) => {
                 self.message = format!("System tray is unavailable: {error}");
             }
         }
     }
 
-    fn process_tray_events(&mut self, ctx: &egui::Context) {
-        while let Ok(event) = TrayIconEvent::receiver().try_recv() {
-            if matches!(event,
-                TrayIconEvent::Click {
-                    button: MouseButton::Left,
-                    button_state: MouseButtonState::Up,
-                    ..
-                } | TrayIconEvent::DoubleClick {
-                    button: MouseButton::Left,
-                    ..
-                }
-            ) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-            }
-        }
-        while let Ok(event) = MenuEvent::receiver().try_recv() {
-            match event.id.0.as_str() {
-                "open" => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                }
-                "pause_resume" => {
-                    if let Some(paused) = self.indexing_paused {
-                        self.set_indexing_paused(!paused);
-                    } else {
-                        self.check_status();
-                    }
-                }
-                "toggle_engine" => {
-                    let action = if self.service_active == Some(true) { "stop" } else { "start" };
-                    self.control_system_service(action);
-                }
-                "settings" => {
-                    self.settings_window_open = true;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                }
-                "exit" => self.exit_requested = true,
-                _ => {}
-            }
-        }
-    }
 
     fn active_profile(&self) -> &ViewProfile {
         self.settings.profiles.get(&self.settings.active_profile)
@@ -496,7 +483,7 @@ impl DeepSearchApp {
         });
     }
 
-    fn receive_messages(&mut self) {
+    fn receive_messages(&mut self, ctx: &egui::Context) {
         while let Ok(message) = self.receiver.try_recv() {
             match message {
                 UiMessage::Status(status) => {
@@ -565,6 +552,32 @@ impl DeepSearchApp {
                         self.service_detail = detail;
                     } else {
                         self.service_detail = format!("Could not change indexing state: {detail}");
+                    }
+                }
+                UiMessage::TrayMenu(action) => {
+                    match action.as_str() {
+                        "open" => {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                        }
+                        "pause_resume" => {
+                            if let Some(paused) = self.indexing_paused {
+                                self.set_indexing_paused(!paused);
+                            } else {
+                                self.check_status();
+                            }
+                        }
+                        "toggle_engine" => {
+                            let action = if self.service_active == Some(true) { "stop" } else { "start" };
+                            self.control_system_service(action);
+                        }
+                        "settings" => {
+                            self.settings_window_open = true;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                        }
+                        "exit" => self.exit_requested = true,
+                        _ => {}
                     }
                 }
                 UiMessage::PickedPaths(paths) => {
@@ -824,9 +837,8 @@ impl TableDelegate for ResultsTableDelegate<'_> {
 
 impl eframe::App for DeepSearchApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.receive_messages();
-        self.create_tray_icon();
-        self.process_tray_events(ctx);
+        self.receive_messages(ctx);
+        self.create_tray_icon(ctx);
         let close_requested = ctx.input(|input| input.viewport().close_requested());
         if close_requested && !self.exit_requested {
             if self.settings.close_to_tray && self.tray_icon.is_some() {
@@ -1051,11 +1063,6 @@ impl eframe::App for DeepSearchApp {
             );
         });
 
-        if self.tray_icon.is_some() {
-            // Keep the event loop alive while the main window is hidden so
-            // tray menu actions can still restore or control the application.
-            ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
-        }
         if self.busy || self.tray_icon.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }
