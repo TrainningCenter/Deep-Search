@@ -31,7 +31,7 @@ jobs:
       - name: Install Linux desktop build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libgl1-mesa-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-cursor-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
+          sudo apt-get install -y libasound2-dev libgl1-mesa-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-cursor-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev xvfb
 
       - name: Validate Linux service scripts
         run: bash -n packaging/linux/install.sh packaging/linux/systemd/install-service.sh packaging/linux/systemd/uninstall-service.sh packaging/linux/systemd/deep-search-service.sh packaging/linux/systemd/test-service-control.sh packaging/macos/launchd/install-service.sh packaging/macos/launchd/uninstall-service.sh packaging/macos/launchd/deep-search-service.sh
@@ -53,3 +53,18 @@ jobs:
 
       - name: Check desktop application
         run: cargo check --features desktop --bin deep-search-ui
+
+      - name: Build desktop application for runtime smoke test
+        run: cargo build --features desktop --bin deep-search-ui
+
+      - name: Launch desktop application under a virtual display
+        shell: bash
+        run: |
+          set +e
+          timeout 5s xvfb-run -a target/debug/deep-search-ui
+          status=$?
+          set -e
+          if [[ "$status" -ne 124 && "$status" -ne 0 ]]; then
+            echo "Desktop application exited unexpectedly with status $status"
+            exit "$status"
+          fi
