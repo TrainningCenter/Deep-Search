@@ -6,6 +6,8 @@ use crate::media::extract_media_metadata;
 use rusqlite::Result;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
+use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+use std::time::Duration;
 
 
 #[derive(Debug, Default)]
@@ -21,6 +23,7 @@ pub struct IndexingReport {
 pub struct SearchEngine {
     database: Database,
     database_path: PathBuf,
+    indexing_paused: Arc<AtomicBool>,
 }
 
 impl SearchEngine {
@@ -28,15 +31,35 @@ impl SearchEngine {
         let requested_path = database_path.as_ref().to_path_buf();
         let database = Database::open(&requested_path)?;
         let database_path = std::fs::canonicalize(&requested_path).unwrap_or(requested_path);
-        Ok(Self { database, database_path })
+        Ok(Self { database, database_path, indexing_paused: Arc::new(AtomicBool::new(false)) })
     }
 
-    /// Connect to a database whose schema has already been initialized.
-    pub fn connect_existing<P: AsRef<Path>>(database_path: P) -> Result<Self> {
+    /// Connect to an initialized database and share indexing pause state with
+    /// other service workers and the filesystem watcher.
+    pub fn connect_existing_with_indexing_state<P: AsRef<Path>>(
+        database_path: P,
+        indexing_paused: Arc<AtomicBool>,
+    ) -> Result<Self> {
         let requested_path = database_path.as_ref().to_path_buf();
         let database = Database::connect_existing(&requested_path)?;
         let database_path = std::fs::canonicalize(&requested_path).unwrap_or(requested_path);
-        Ok(Self { database, database_path })
+        Ok(Self { database, database_path, indexing_paused })
+    }
+
+    /// Connect to an initialized database without sharing pause state.
+    pub fn connect_existing<P: AsRef<Path>>(database_path: P) -> Result<Self> {
+        Self::connect_existing_with_indexing_state(
+            database_path,
+            Arc::new(AtomicBool::new(false)),
+        )
+    }
+
+    pub fn set_indexing_paused(&self, paused: bool) {
+        self.indexing_paused.store(paused, Ordering::Release);
+    }
+
+    pub fn is_indexing_paused(&self) -> bool {
+        self.indexing_paused.load(Ordering::Acquire)
     }
 
     pub fn index_roots(&self) -> Result<Vec<PathBuf>> {
@@ -82,6 +105,11 @@ impl SearchEngine {
         let mut internal_files_skipped = 0_u64;
 
         let scan = scan_paths_batched(paths, INDEX_BATCH_SIZE, |batch| {
+            // Pause at batch boundaries so file traversal and metadata extraction
+            // stop promptly without abandoning the active database transaction.
+            while self.indexing_paused.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(100));
+            }
             let filtered_batch = batch.iter().filter(|file| {
                 if is_database_sidecar(&file.path, &self.database_path) {
                     internal_files_skipped += 1;
