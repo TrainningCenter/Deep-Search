@@ -95,6 +95,11 @@ fn parse_condition(token: &str) -> Result<SearchExpression, String> {
         if value.is_empty() { return Err("path: requires a value".into()); }
         return Ok(SearchExpression::PathContains(value.into()));
     }
+    if lower.starts_with("source:") {
+        let value = &token[7..];
+        if value.is_empty() { return Err("source: requires a value".into()); }
+        return Ok(SearchExpression::SourceContains(value.into()));
+    }
     if lower.starts_with("content:") {
         let value = &token[8..];
         if value.is_empty() { return Err("content: requires a value".into()); }

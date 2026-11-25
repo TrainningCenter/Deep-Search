@@ -13,6 +13,7 @@ pub struct SearchResult {
     pub size_bytes: u64,
     pub modified_timestamp_ns: Option<u64>,
     pub media_metadata: Option<MediaMetadata>,
+    pub source: String,
 }
 
 fn map_search_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<SearchResult> {
@@ -28,6 +29,7 @@ fn map_search_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<SearchResult> 
         size_bytes: size.max(0) as u64,
         modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
         media_metadata,
+        source: row.get(6)?,
     })
 }
 
@@ -39,6 +41,7 @@ pub enum SearchSortField {
     Extension,
     Size,
     Modified,
+    Source,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +59,7 @@ pub enum SearchExpression {
     FileType(String),
     SizeAtLeast(u64),
     SizeAtMost(u64),
+    SourceContains(String),
     DurationAtLeast(u64),
     DurationAtMost(u64),
     And(Vec<SearchExpression>),
@@ -125,6 +129,14 @@ fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) ->
             values.push(Value::Text(format!("%{escaped}%")));
             format!("path LIKE ?{} ESCAPE '\\' COLLATE NOCASE", values.len())
         }
+        SearchExpression::SourceContains(term) => {
+            let escaped = term.trim()
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            values.push(Value::Text(format!("%{escaped}%")));
+            format!("{} LIKE ?{} ESCAPE '\\' COLLATE NOCASE", source_path_sql(), values.len())
+        }
         SearchExpression::ContentContains(term) => {
             let term = term.trim();
             if term.chars().count() >= 3 {
@@ -193,6 +205,16 @@ fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) ->
     }
 }
 
+const ROOT_MATCH_SQL: &str = "(files.path = r.path OR (substr(files.path, 1, length(r.path)) = r.path AND (substr(r.path, -1, 1) IN ('/', char(92)) OR substr(files.path, length(r.path) + 1, 1) IN ('/', char(92)))))";
+
+fn source_path_sql() -> String {
+    format!("(SELECT r.path FROM index_roots r WHERE {ROOT_MATCH_SQL} ORDER BY length(r.path) DESC LIMIT 1)")
+}
+
+fn source_enabled_sql() -> String {
+    format!("COALESCE((SELECT r.enabled FROM index_roots r WHERE {ROOT_MATCH_SQL} ORDER BY length(r.path) DESC LIMIT 1), 1) = 1")
+}
+
 pub struct Database {
     connection: Connection,
 }
@@ -255,7 +277,8 @@ impl Database {
             );
 
             CREATE TABLE IF NOT EXISTS index_roots (
-                path TEXT PRIMARY KEY
+                path TEXT PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS service_settings (
@@ -270,6 +293,18 @@ impl Database {
 
             ",
         )?;
+
+        let has_enabled_column: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('index_roots') WHERE name = 'enabled')",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_enabled_column {
+            self.connection.execute(
+                "ALTER TABLE index_roots ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",
+                [],
+            )?;
+        }
 
         let has_content_column: bool = self.connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info('files') WHERE name = 'content')",
@@ -607,7 +642,7 @@ impl Database {
         let transaction = self.connection.unchecked_transaction()?;
         {
             let mut statement = transaction.prepare(
-                "INSERT OR IGNORE INTO index_roots(path) VALUES (?1)"
+                "INSERT OR IGNORE INTO index_roots(path, enabled) VALUES (?1, 1)"
             )?;
             for root in roots {
                 let path = root.as_ref().to_string_lossy().into_owned();
@@ -626,6 +661,26 @@ impl Database {
             Ok(std::path::PathBuf::from(path))
         })?;
         rows.collect()
+    }
+
+    pub fn index_roots_with_state(&self) -> Result<Vec<(std::path::PathBuf, bool)>> {
+        let mut statement = self.connection.prepare(
+            "SELECT path, enabled FROM index_roots ORDER BY path"
+        )?;
+        let rows = statement.query_map([], |row| {
+            let path: String = row.get(0)?;
+            let enabled: bool = row.get(1)?;
+            Ok((std::path::PathBuf::from(path), enabled))
+        })?;
+        rows.collect()
+    }
+
+    pub fn set_index_root_enabled(&self, path: &Path, enabled: bool) -> Result<bool> {
+        let changed = self.connection.execute(
+            "UPDATE index_roots SET enabled = ?1 WHERE path = ?2",
+            params![enabled, path.to_string_lossy().as_ref()],
+        )?;
+        Ok(changed > 0)
     }
 
     pub fn stop_on_logout(&self) -> Result<bool> {
@@ -673,15 +728,17 @@ impl Database {
         let mut values = Vec::new();
         let condition = compile_expression(expression, &mut values);
         let relevance = name_relevance_order(expression, &mut values);
+        let source_sql = source_path_sql();
+        let enabled_sql = source_enabled_sql();
         let sql = format!(
-            "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path) FROM files WHERE {condition} ORDER BY {relevance}, name COLLATE NOCASE"
+            "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path), COALESCE({source_sql}, 'Unassigned') FROM files WHERE ({condition}) AND {enabled_sql} ORDER BY {relevance}, name COLLATE NOCASE"
         );
         let mut statement = self.connection.prepare(&sql)?;
         let rows = statement.query_map(params_from_iter(values.iter()), map_search_result)?;
         rows.collect()
     }
 
-    /// Return a bounded page of matching files while preserving relevance order.
+    /// Return a bounded page of matching files    /// Return a bounded page of matching files while preserving relevance order.
     /// Page sizes are clamped to 1..=1000 to protect the search service from
     /// accidentally loading an unbounded result set.
     pub fn search_page(
@@ -710,6 +767,8 @@ impl Database {
     ) -> Result<Vec<SearchResult>> {
         let mut values = Vec::new();
         let condition = compile_expression(expression, &mut values);
+        let source_sql = source_path_sql();
+        let enabled_sql = source_enabled_sql();
         let order_by = match sort_field {
             SearchSortField::Relevance => name_relevance_order(expression, &mut values),
             SearchSortField::Name => "name COLLATE NOCASE".to_string(),
@@ -717,6 +776,7 @@ impl Database {
             SearchSortField::Extension => "extension COLLATE NOCASE".to_string(),
             SearchSortField::Size => "size_bytes".to_string(),
             SearchSortField::Modified => "modified_unix".to_string(),
+            SearchSortField::Source => format!("COALESCE({source_sql}, 'Unassigned') COLLATE NOCASE"),
         };
         let direction = match sort_direction {
             SearchSortDirection::Ascending => "ASC",
@@ -730,8 +790,8 @@ impl Database {
         values.push(Value::Integer(limit.clamp(1, 1000) as i64));
         values.push(Value::Integer(offset.min(i64::MAX as u64) as i64));
         let sql = format!(
-            "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path) FROM files
-             WHERE {condition}
+            "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path), COALESCE({source_sql}, 'Unassigned') FROM files
+             WHERE ({condition}) AND {enabled_sql}
              ORDER BY {order_by}
              LIMIT ?{} OFFSET ?{}",
             values.len() - 1,
@@ -742,101 +802,82 @@ impl Database {
         rows.collect()
     }
 
-    /// Count all matches without loading their file records into memory.
+    /// Count all matches    /// Count all matches without loading their file records into memory.
     pub fn count_search_results(&self, expression: &SearchExpression) -> Result<u64> {
         let mut values = Vec::new();
         let condition = compile_expression(expression, &mut values);
+        let enabled_sql = source_enabled_sql();
         let count: i64 = self.connection.query_row(
-            &format!("SELECT COUNT(*) FROM files WHERE {condition}"),
+            &format!("SELECT COUNT(*) FROM files WHERE ({condition}) AND {enabled_sql}"),
             params_from_iter(values.iter()),
             |row| row.get(0),
         )?;
         Ok(count.max(0) as u64)
     }
 
-    pub fn search_content(&self, term: &str) -> Result<Vec<SearchResult>> {
+    pub fn search_content(&self, term: &str)    pub fn search_content(&self, term: &str) -> Result<Vec<SearchResult>> {
         let term = term.trim();
-        if term.is_empty() {
-            return Ok(Vec::new());
-        }
-
+        if term.is_empty() { return Ok(Vec::new()); }
+        let source_sql = source_path_sql();
+        let enabled_sql = source_enabled_sql();
         if term.chars().count() >= 3 {
             let phrase = format!("\"{}\"", term.replace('"', "\"\""));
-            let mut statement = self.connection.prepare(
-                "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path) FROM files
-                 WHERE id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?1)
+            let sql = format!(
+                "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path), COALESCE({source_sql}, 'Unassigned') FROM files
+                 WHERE id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?1) AND {enabled_sql}
                  ORDER BY name COLLATE NOCASE"
-            )?;
+            );
+            let mut statement = self.connection.prepare(&sql)?;
             let rows = statement.query_map([phrase], map_search_result)?;
             rows.collect()
         } else {
-            let escaped = term
-                .replace('\\', "\\\\")
-                .replace('%', "\\%")
-                .replace('_', "\\_");
+            let escaped = term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
             let pattern = format!("%{escaped}%");
-            let mut statement = self.connection.prepare(
-                "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path) FROM files
-                 WHERE content LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+            let sql = format!(
+                "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path), COALESCE({source_sql}, 'Unassigned') FROM files
+                 WHERE content LIKE ?1 ESCAPE '\\' COLLATE NOCASE AND {enabled_sql}
                  ORDER BY name COLLATE NOCASE"
-            )?;
+            );
+            let mut statement = self.connection.prepare(&sql)?;
             let rows = statement.query_map([pattern], map_search_result)?;
             rows.collect()
         }
     }
 
-    pub fn search_by_name(&self, term: &str) -> Result<Vec<SearchResult>> {
+    pub fn search_by_name(&self, term: &str)    pub fn search_by_name(&self, term: &str) -> Result<Vec<SearchResult>> {
         let term = term.trim();
-        if term.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let escaped = term
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
+        if term.is_empty() { return Ok(Vec::new()); }
+        let escaped = term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
         let pattern = format!("%{}%", escaped);
         let prefix = format!("{}%", escaped);
-
-        let mut statement = self.connection.prepare(
-            "
-            SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path)
-            FROM files
-            WHERE name LIKE ?1 ESCAPE '\\' COLLATE NOCASE
-            ORDER BY
-                CASE
-                    WHEN name = ?2 COLLATE NOCASE THEN 0
-                    WHEN name LIKE ?3 ESCAPE '\\' COLLATE NOCASE THEN 1
-                    ELSE 2
-                END,
-                name COLLATE NOCASE
-            ",
-        )?;
-
+        let source_sql = source_path_sql();
+        let enabled_sql = source_enabled_sql();
+        let sql = format!(
+            "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path), COALESCE({source_sql}, 'Unassigned')
+             FROM files
+             WHERE name LIKE ?1 ESCAPE '\\' COLLATE NOCASE AND {enabled_sql}
+             ORDER BY CASE
+                 WHEN name = ?2 COLLATE NOCASE THEN 0
+                 WHEN name LIKE ?3 ESCAPE '\\' COLLATE NOCASE THEN 1
+                 ELSE 2
+             END, name COLLATE NOCASE"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
         let rows = statement.query_map(params![pattern, term, prefix], map_search_result)?;
-
         rows.collect()
     }
 
-    pub fn search_by_extension(
-        &self,
-        extension: &str,
-    ) -> Result<Vec<SearchResult>> {
-        let extension = extension
-            .trim_start_matches('.')
-            .to_lowercase();
-
-        let mut statement = self.connection.prepare(
-            "
-            SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path)
-            FROM files
-            WHERE extension = ?1 COLLATE NOCASE
-            ORDER BY name COLLATE NOCASE
-            ",
-        )?;
-
+    pub fn search_by_extension(&self, extension: &str) -> Result<Vec<SearchResult>> {
+        let extension = extension.trim_start_matches('.').to_lowercase();
+        let source_sql = source_path_sql();
+        let enabled_sql = source_enabled_sql();
+        let sql = format!(
+            "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path), COALESCE({source_sql}, 'Unassigned')
+             FROM files WHERE extension = ?1 COLLATE NOCASE AND {enabled_sql}
+             ORDER BY name COLLATE NOCASE"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
         let rows = statement.query_map([extension], map_search_result)?;
-
         rows.collect()
     }
 
@@ -847,25 +888,21 @@ impl Database {
     ) -> Result<Vec<SearchResult>> {
         let min_size = min_bytes.map(|value| value.min(i64::MAX as u64) as i64);
         let max_size = max_bytes.map(|value| value.min(i64::MAX as u64) as i64);
-
-        let mut statement = self.connection.prepare(
-            "
-            SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path)
-            FROM files
-            WHERE (?1 IS NULL OR size_bytes >= ?1)
-              AND (?2 IS NULL OR size_bytes <= ?2)
-            ORDER BY size_bytes
-            ",
-        )?;
-
-        let rows = statement.query_map(
-            params![min_size, max_size],
-            map_search_result,
-        )?;
-
+        let source_sql = source_path_sql();
+        let enabled_sql = source_enabled_sql();
+        let sql = format!(
+            "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path), COALESCE({source_sql}, 'Unassigned')
+             FROM files
+             WHERE (?1 IS NULL OR size_bytes >= ?1) AND (?2 IS NULL OR size_bytes <= ?2) AND {enabled_sql}
+             ORDER BY size_bytes"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map(params![min_size, max_size], map_search_result)?;
         rows.collect()
     }
 }
+
+#[cfg(test)]}
 
 #[cfg(test)]
 mod database_tests {

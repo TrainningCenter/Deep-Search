@@ -226,6 +226,7 @@ fn parse_sort_field(value: &str) -> Result<SearchSortField, &'static str> {
         "extension" | "ext" => Ok(SearchSortField::Extension),
         "size" => Ok(SearchSortField::Size),
         "modified" | "date" => Ok(SearchSortField::Modified),
+        "source" => Ok(SearchSortField::Source),
         _ => Err("Sort field must be relevance, name, path, extension, size, or modified"),
     }
 }
@@ -268,7 +269,7 @@ fn print_usage() {
     println!("  deep-search content <database> <text>");
     println!(r#"  deep-search query <database> 'name:video' AND (ext:mkv OR ext:mp4) AND size>=1GB"#);
     println!(r#"  deep-search query-page <database> <limit> <offset> 'type:video' AND path:"Media Archive""#);
-    println!("    Optional: --sort relevance|name|path|extension|size|modified --order asc|desc");
+    println!("    Optional: --sort relevance|name|path|extension|size|modified|source --order asc|desc");
     println!("  deep-search extension <database> <extension>");
     println!("  deep-search count <database>");
 }

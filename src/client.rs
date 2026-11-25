@@ -52,6 +52,10 @@ impl ServiceClient {
         self.request(json!({"command": "index", "paths": paths}))
     }
 
+    pub fn set_root_enabled(&self, path: &str, enabled: bool) -> Result<Value, Box<dyn Error>> {
+        self.request(json!({"command": "set_root_enabled", "path": path, "enabled": enabled}))
+    }
+
     /// Fetches every match automatically and reports each completed transport batch.
     /// The batch size is an internal transport detail, never a cap on total matches.
     pub fn search_all(

@@ -19,6 +19,7 @@ enum UiMessage {
     ServiceState { active: Option<bool>, enabled: Option<bool>, detail: String },
     ServiceAction { action: String, success: bool, detail: String },
     ServiceLogoutSetting { enabled: bool, success: bool, detail: String },
+    RootSetting { success: bool, detail: String },
     IndexingPause { paused: bool, success: bool, detail: String },
     IndexError(String),
     TrayMenu(String),
@@ -131,6 +132,7 @@ fn default_columns() -> Vec<ColumnSetting> {
         ColumnSetting { key: "bit_rate".into(), visible: false, width: 110.0 },
         ColumnSetting { key: "sample_rate".into(), visible: false, width: 110.0 },
         ColumnSetting { key: "channels".into(), visible: false, width: 90.0 },
+        ColumnSetting { key: "source".into(), visible: true, width: 190.0 },
         ColumnSetting { key: "image_format".into(), visible: false, width: 110.0 },
         ColumnSetting { key: "camera_make".into(), visible: false, width: 150.0 },
         ColumnSetting { key: "camera_model".into(), visible: false, width: 180.0 },
@@ -170,13 +172,13 @@ impl UiSettings {
             .and_then(|bytes| serde_json::from_slice::<Self>(&bytes).ok())
             .unwrap_or_default();
         if settings.profiles.is_empty() {
-            settings.profiles.insert("Default".into(), default_profile(&["name", "extension", "size", "path"]));
-            settings.profiles.insert("Videos".into(), default_profile(&["name", "extension", "duration", "resolution", "video_codec", "audio_codec", "frame_rate", "size", "modified", "path"]));
+            settings.profiles.insert("Default".into(), default_profile(&["name", "extension", "size", "source", "path"]));
+            settings.profiles.insert("Videos".into(), default_profile(&["name", "extension", "duration", "resolution", "video_codec", "audio_codec", "frame_rate", "size", "source", "modified", "path"]));
             settings.profiles.insert("Audio".into(), default_profile(&["name", "extension", "duration", "audio_codec", "bit_rate", "sample_rate", "channels", "size", "path"]));
             settings.profiles.insert("Images".into(), default_profile(&["name", "extension", "resolution", "image_format", "camera_make", "camera_model", "captured_at", "orientation", "size", "path"]));
             settings.profiles.insert("Documents".into(), default_profile(&["name", "extension", "modified", "size", "path"]));
             settings.profiles.insert("Large files".into(), default_profile(&["name", "size", "extension", "path"]));
-            settings.profiles.insert("NAS".into(), default_profile(&["name", "size", "modified", "path"]));
+            settings.profiles.insert("NAS".into(), default_profile(&["name", "size", "source", "modified", "path"]));
             settings.active_profile = "Default".into();
             settings.save();
         }
@@ -258,6 +260,7 @@ struct DeepSearchApp {
     exit_requested: bool,
     settings_window_open: bool,
     nas_status: BTreeMap<String, bool>,
+    index_roots: Vec<(String, bool)>,
     nas_check_in_progress: bool,
     nas_last_check: Option<Instant>,
 }
@@ -299,6 +302,7 @@ impl Default for DeepSearchApp {
             exit_requested: false,
             settings_window_open: false,
             nas_status: BTreeMap::new(),
+            index_roots: Vec::new(),
             nas_check_in_progress: false,
             nas_last_check: None,
         }
@@ -490,7 +494,7 @@ impl DeepSearchApp {
                     egui::ComboBox::from_id_salt(("search_builder_field", index))
                         .selected_text(&condition.field)
                         .show_ui(ui, |ui| {
-                            for field in ["name", "path", "content", "extension", "type", "size", "duration"] {
+                            for field in ["name", "path", "source", "content", "extension", "type", "size", "duration"] {
                                 if ui.selectable_label(condition.field == field, field).clicked() {
                                     condition.field = field.to_owned();
                                     condition.operator = if field == "size" || field == "duration" { "at least".into() } else if field == "extension" || field == "type" { "is".into() } else { "contains".into() };
@@ -641,6 +645,21 @@ impl DeepSearchApp {
         });
     }
 
+    fn set_root_enabled(&mut self, path: String, enabled: bool) {
+        let client = self.client();
+        let sender = self.sender.clone();
+        self.service_busy = true;
+        thread::spawn(move || {
+            let result = client.set_root_enabled(&path, enabled)
+                .and_then(|_| client.status());
+            let message = match result {
+                Ok(status) => UiMessage::Status(status),
+                Err(error) => UiMessage::RootSetting { success: false, detail: error.to_string() },
+            };
+            let _ = sender.send(message);
+        });
+    }
+
     fn check_status(&mut self) {
         let client = self.client();
         let sender = self.sender.clone();
@@ -749,6 +768,12 @@ impl DeepSearchApp {
                 UiMessage::Status(status) => {
                     self.busy = false;
                     self.indexed_files = status.get("indexed_files").and_then(Value::as_u64);
+                    self.index_roots = status.get("index_roots").and_then(Value::as_array)
+                        .map(|roots| roots.iter().filter_map(|root| {
+                            Some((root.get("path")?.as_str()?.to_owned(), root.get("enabled")?.as_bool()?))
+                        }).collect())
+                        .unwrap_or_default();
+                    self.service_busy = false;
                     self.stop_on_logout = status.get("stop_on_logout").and_then(Value::as_bool);
                     self.indexing_paused = status.get("indexing_paused").and_then(Value::as_bool);
                     self.logout_detection_available = status.get("logout_detection_available").and_then(Value::as_bool);
@@ -833,6 +858,10 @@ impl DeepSearchApp {
                     } else {
                         self.service_detail = format!("Could not update logout preference: {detail}");
                     }
+                }
+                UiMessage::RootSetting { success, detail } => {
+                    self.service_busy = false;
+                    self.service_detail = if success { detail } else { format!("Could not update search source: {detail}") };
                 }
                 UiMessage::IndexingPause { paused, success, detail } => {
                     self.service_busy = false;
@@ -1248,6 +1277,23 @@ impl eframe::App for DeepSearchApp {
                 self.index_roots();
             }
             ui.separator();
+            ui.collapsing(display_text(if self.arabic { "مصادر البحث" } else { "Search sources" }), |ui| {
+                if self.index_roots.is_empty() {
+                    ui.label(display_text(if self.arabic { "لا توجد مصادر مفهرسة بعد." } else { "No indexed sources yet." }));
+                }
+                for (path, enabled) in self.index_roots.clone() {
+                    let mut included = enabled;
+                    if ui.add_enabled(!self.service_busy, egui::Checkbox::new(&mut included, display_text(&path))).changed() {
+                        self.set_root_enabled(path, included);
+                    }
+                }
+                ui.small(display_text(if self.arabic {
+                    "إلغاء التحديد يستبعد المصدر من البحث فقط، ولا يوقف فهرسته أو يحذف بياناته."
+                } else {
+                    "Unchecking a source excludes it from searches only; indexing continues and its data is preserved."
+                }));
+            });
+            ui.separator();
             ui.collapsing(display_text(if self.arabic { "إدارة خدمة الخلفية" } else { "Background service" }), |ui| {
                 if let Some(active) = self.service_active {
                     ui.label(display_text(format!("Runtime: {}", if active { "Running" } else { "Stopped" })));
@@ -1317,7 +1363,7 @@ impl eframe::App for DeepSearchApp {
             ui.with_layout(horizontal_layout(self.arabic), |ui| { ui.text_edit_singleline(&mut self.search_query); });
             egui::ComboBox::from_label(display_text(if self.arabic { "ترتيب حسب" } else { "Sort by" }))
                 .selected_text(&self.sort_field).show_ui(ui, |ui| {
-                    for field in ["name", "path", "extension", "size", "modified", "relevance"] {
+                    for field in ["name", "path", "source", "extension", "size", "modified", "relevance"] {
                         ui.selectable_value(&mut self.sort_field, field.to_owned(), field);
                     }
                 });
@@ -1426,6 +1472,7 @@ fn search_profile_query(profile: &SearchProfile) -> Option<String> {
             match (condition.field.as_str(), condition.operator.as_str()) {
                 ("name", _) => format!("name:\"{safe_value}\""),
                 ("path", _) => format!("path:\"{safe_value}\""),
+                ("source", _) => format!("source:\"{safe_value}\""),
                 ("content", _) => format!("content:\"{safe_value}\""),
                 ("extension", "is not") => format!("NOT ext:{}", safe_value.trim_start_matches('.')),
                 ("extension", _) => format!("ext:{}", safe_value.trim_start_matches('.')),
@@ -1449,7 +1496,7 @@ fn search_profile_query(profile: &SearchProfile) -> Option<String> {
 fn result_column_text(result: &Value, key: &str) -> String {
     let media = result.get("media_metadata");
     match key {
-        "name" | "extension" | "path" => result.get(key).and_then(Value::as_str)
+        "name" | "extension" | "path" | "source" => result.get(key).and_then(Value::as_str)
             .unwrap_or("—").to_owned(),
         "modified" => result.get("modified_timestamp_ns").and_then(Value::as_u64)
             .map(format_modified).unwrap_or_else(|| "—".to_owned()),
@@ -1779,6 +1826,7 @@ fn column_label(key: &str, arabic: bool) -> &'static str {
             "camera_model" => "طراز الكاميرا",
             "captured_at" => "تاريخ الالتقاط",
             "orientation" => "الاتجاه",
+            "source" => "المصدر",
             "path" => "المسار",
             _ => "عمود",
         }
@@ -1802,6 +1850,7 @@ fn column_label(key: &str, arabic: bool) -> &'static str {
             "camera_model" => "Camera model",
             "captured_at" => "Date taken",
             "orientation" => "Orientation",
+            "source" => "Source",
             "path" => "Path",
             _ => "Column",
         }

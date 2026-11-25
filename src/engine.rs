@@ -66,6 +66,14 @@ impl SearchEngine {
         self.database.index_roots()
     }
 
+    pub fn index_roots_with_state(&self) -> Result<Vec<(PathBuf, bool)>> {
+        self.database.index_roots_with_state()
+    }
+
+    pub fn set_index_root_enabled(&self, path: &Path, enabled: bool) -> Result<bool> {
+        self.database.set_index_root_enabled(path, enabled)
+    }
+
     pub fn stop_on_logout(&self) -> Result<bool> {
         self.database.stop_on_logout()
     }

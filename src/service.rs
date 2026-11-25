@@ -450,6 +450,10 @@ fn handle_request_with_context(
         match command {
             "status" => Ok(json!({
                 "indexed_files": engine.indexed_file_count()?,
+                "index_roots": engine.index_roots_with_state()?.iter().map(|(path, enabled)| json!({
+                    "path": path.to_string_lossy(),
+                    "enabled": enabled
+                })).collect::<Vec<_>>(),
                 "stop_on_logout": engine.stop_on_logout()?,
                 "logout_detection_available": current_user_session_state().is_some(),
                 "indexing_paused": engine.is_indexing_paused(),
@@ -460,6 +464,16 @@ fn handle_request_with_context(
                     .ok_or("Missing boolean field: enabled")?;
                 engine.set_stop_on_logout(enabled)?;
                 Ok(json!({"stop_on_logout": enabled}))
+            },
+            "set_root_enabled" => {
+                let path = request.get("path").and_then(Value::as_str)
+                    .ok_or("Missing string field: path")?;
+                let enabled = request.get("enabled").and_then(Value::as_bool)
+                    .ok_or("Missing boolean field: enabled")?;
+                if !engine.set_index_root_enabled(Path::new(path), enabled)? {
+                    return Err(format!("Unknown indexing source: {path}").into());
+                }
+                Ok(json!({"path": path, "enabled": enabled}))
             },
             "pause_indexing" => {
                 engine.set_indexing_paused(true);
@@ -515,7 +529,8 @@ fn handle_request_with_context(
                     "extension" | "ext" => SearchSortField::Extension,
                     "size" => SearchSortField::Size,
                     "modified" | "date" => SearchSortField::Modified,
-                    _ => return Err("Sort must be relevance, name, path, extension, size, or modified".into()),
+                    "source" => SearchSortField::Source,
+                    _ => return Err("Sort must be relevance, name, path, extension, size, modified, or source".into()),
                 };
                 let order = match request.get("order").and_then(Value::as_str).unwrap_or("asc") {
                     "asc" | "ascending" => SearchSortDirection::Ascending,
