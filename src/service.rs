@@ -106,8 +106,22 @@ fn spawn_filesystem_watcher(
             }
         };
         let mut watched = HashSet::new();
-        for root in initial_roots {
-            register_watch(&mut watcher, &root, &mut watched);
+        for root in &initial_roots {
+            register_watch(&mut watcher, root, &mut watched);
+        }
+        if !initial_roots.is_empty() {
+            match index_lock.lock() {
+                Ok(_guard) => {
+                    let paths = initial_roots.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+                    let report = engine.index_paths(&paths);
+                    eprintln!(
+                        "Startup reconciliation complete: {} discovered, {} saved, {} removed, {} errors",
+                        report.files_discovered, report.files_saved,
+                        report.files_removed, report.errors
+                    );
+                }
+                Err(_) => eprintln!("Startup reconciliation skipped because the indexing lock was poisoned"),
+            }
         }
 
         let mut pending_paths = HashSet::<PathBuf>::new();
