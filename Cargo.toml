@@ -20,7 +20,7 @@ required-features = ["desktop"]
 
 [features]
 default = []
-desktop = ["dep:eframe", "dep:egui_table"]
+desktop = ["dep:eframe", "dep:egui_table", "dep:tray-icon"]
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -33,5 +33,6 @@ notify = "8"
 rayon = "1.10"
 eframe = { version = "0.31", optional = true }
 egui_table = { version = "0.3", optional = true }
+tray-icon = { version = "0.26.1", default-features = false, features = ["ksni"], optional = true }
 
 [dev-dependencies]
