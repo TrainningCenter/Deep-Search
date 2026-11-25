@@ -1905,7 +1905,49 @@ fn format_size(bytes: u64) -> String {
 
 #[cfg(test)]
 mod rtl_text_tests {
-    use super::{display_text, UiSettings};
+    use super::{display_text, search_profile_query, SearchCondition, SearchProfile, UiSettings};
+
+    #[test]
+    fn advanced_search_builder_generates_boolean_queries() {
+        let profile = SearchProfile {
+            conditions: vec![
+                SearchCondition { field: "name".into(), operator: "contains".into(), value: "holiday video".into(), enabled: true },
+                SearchCondition { field: "size".into(), operator: "at least".into(), value: "1GB".into(), enabled: true },
+            ],
+            join_with_or: false,
+        };
+        assert_eq!(
+            search_profile_query(&profile).as_deref(),
+            Some(r#"name:"holiday video" AND size>=1GB"#)
+        );
+    }
+
+    #[test]
+    fn advanced_search_builder_supports_exact_size_and_ignores_disabled_conditions() {
+        let profile = SearchProfile {
+            conditions: vec![
+                SearchCondition { field: "size".into(), operator: "is".into(), value: "500MB".into(), enabled: true },
+                SearchCondition { field: "extension".into(), operator: "is".into(), value: "tmp".into(), enabled: false },
+            ],
+            join_with_or: false,
+        };
+        assert_eq!(
+            search_profile_query(&profile).as_deref(),
+            Some("size>=500MB AND size<=500MB")
+        );
+    }
+
+    #[test]
+    fn advanced_search_builder_returns_none_without_active_values() {
+        let profile = SearchProfile {
+            conditions: vec![
+                SearchCondition { field: "name".into(), operator: "contains".into(), value: "  ".into(), enabled: true },
+                SearchCondition { field: "path".into(), operator: "contains".into(), value: "ignored".into(), enabled: false },
+            ],
+            join_with_or: true,
+        };
+        assert!(search_profile_query(&profile).is_none());
+    }
 
     #[test]
     fn arabic_display_text_shapes_letters_and_preserves_latin_runs() {
