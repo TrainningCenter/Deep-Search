@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: deep-search-service <status|is-active|is-enabled|start|stop|restart|enable|disable> [linux-username]
+Usage: deep-search-service <status|is-active|is-enabled|logs|logs-follow|start|stop|restart|enable|disable> [linux-username]
 Read-only actions do not require root. start/stop/restart/enable/disable require root.
 EOF
   exit 2
@@ -40,6 +40,12 @@ case "$action" in
     ;;
   is-enabled)
     exec systemctl is-enabled "$unit"
+    ;;
+  logs)
+    exec journalctl --unit "$unit" --no-pager --lines=100
+    ;;
+  logs-follow)
+    exec journalctl --unit "$unit" --follow
     ;;
   start|stop|restart|enable|disable)
     [[ ${EUID} -eq 0 ]] || {
