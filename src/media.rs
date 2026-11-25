@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::ffi::{OsStr, OsString};
+use std::io::BufReader;
 use std::path::Path;
 use std::process::Command;
 use std::sync::OnceLock;
@@ -14,6 +15,9 @@ const VIDEO_EXTENSIONS: &[&str] = &[
 ];
 const AUDIO_EXTENSIONS: &[&str] = &[
     "aac", "aif", "aiff", "alac", "flac", "m4a", "mp3", "ogg", "opus", "wav", "wma",
+];
+const IMAGE_EXTENSIONS: &[&str] = &[
+    "avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp",
 ];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,12 +33,91 @@ pub struct MediaMetadata {
     pub bit_rate: Option<u64>,
     pub sample_rate: Option<u32>,
     pub channels: Option<u32>,
+    pub image_format: Option<String>,
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
+    pub captured_at: Option<String>,
+    pub orientation: Option<String>,
 }
 
 pub fn is_supported_media_extension(extension: Option<&str>) -> bool {
     let Some(extension) = extension else { return false; };
     let extension = extension.trim_start_matches('.').to_ascii_lowercase();
-    VIDEO_EXTENSIONS.contains(&extension.as_str()) || AUDIO_EXTENSIONS.contains(&extension.as_str())
+    VIDEO_EXTENSIONS.contains(&extension.as_str())
+        || AUDIO_EXTENSIONS.contains(&extension.as_str())
+        || IMAGE_EXTENSIONS.contains(&extension.as_str())
+}
+
+pub fn is_supported_image_extension(extension: Option<&str>) -> bool {
+    let Some(extension) = extension else { return false; };
+    IMAGE_EXTENSIONS.contains(&extension.trim_start_matches('.').to_ascii_lowercase().as_str())
+}
+
+/// Read image dimensions and basic EXIF fields without decoding image pixels.
+pub fn extract_image_metadata(path: &Path, extension: Option<&str>) -> Option<MediaMetadata> {
+    if !is_supported_image_extension(extension) {
+        return None;
+    }
+
+    if extension.is_some_and(|value| value.eq_ignore_ascii_case("svg")) {
+        if let Some(metadata) = extract_svg_metadata(path) {
+            return Some(metadata);
+        }
+    }
+
+    let reader = image::ImageReader::open(path).ok()?.with_guessed_format().ok()?;
+    let format = reader.format().map(|value| format!("{value:?}").to_ascii_lowercase());
+    let (width, height) = reader.into_dimensions().ok()?;
+    let exif = exif::Reader::new()
+        .read_from_container(&mut BufReader::new(std::fs::File::open(path).ok()?))
+        .ok();
+    let exif_value = |tag| {
+        exif.as_ref()
+            .and_then(|reader| reader.get_field(tag, exif::In::PRIMARY))
+            .map(|field| field.display_value().to_string())
+    };
+
+    Some(MediaMetadata {
+        width: Some(width),
+        height: Some(height),
+        image_format: format.or_else(|| extension.map(|value| value.trim_start_matches('.').to_ascii_lowercase())),
+        camera_make: exif_value(exif::Tag::Make),
+        camera_model: exif_value(exif::Tag::Model),
+        captured_at: exif_value(exif::Tag::DateTimeOriginal).or_else(|| exif_value(exif::Tag::DateTime)),
+        orientation: exif_value(exif::Tag::Orientation),
+        ..Default::default()
+    })
+}
+
+fn extract_svg_metadata(path: &Path) -> Option<MediaMetadata> {
+    let text = std::fs::read_to_string(path).ok()?;
+    if text.len() > 16 * 1024 * 1024 { return None; }
+    let document = roxmltree::Document::parse(&text).ok()?;
+    let root = document.root_element();
+    if root.tag_name().name() != "svg" { return None; }
+    let parse_dimension = |value: Option<&str>| {
+        value.and_then(|value| {
+            let numeric = value.trim().trim_end_matches("px").trim_end_matches("pt");
+            numeric.parse::<f64>().ok().filter(|number| number.is_finite() && *number > 0.0 && *number <= u32::MAX as f64)
+                .map(|number| number.round() as u32)
+        })
+    };
+    let view_box = root.attribute("viewBox").or_else(|| root.attribute("viewbox"))
+        .and_then(|value| {
+            let values = value.split(|ch: char| ch.is_ascii_whitespace() || ch == ',')
+                .filter(|part| !part.is_empty()).collect::<Vec<_>>();
+            if values.len() == 4 {
+                Some((values[2].parse::<f64>().ok()?, values[3].parse::<f64>().ok()?))
+            } else { None }
+        });
+    let width = parse_dimension(root.attribute("width")).or_else(|| view_box.map(|value| value.0.round() as u32));
+    let height = parse_dimension(root.attribute("height")).or_else(|| view_box.map(|value| value.1.round() as u32));
+    Some(MediaMetadata {
+        width,
+        height,
+        image_format: Some("svg".into()),
+        ..Default::default()
+    })
 }
 
 /// Uses ffprobe when it is installed. Missing ffprobe or malformed media never
