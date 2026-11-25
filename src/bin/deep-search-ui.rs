@@ -15,6 +15,7 @@ enum UiMessage {
     Indexed(Value),
     SearchProgress { batch: Vec<Value>, loaded: u64, total: u64 },
     SearchFinished { total: u64 },
+    SearchError(String),
     Error(String),
     ServiceState { active: Option<bool>, enabled: Option<bool>, detail: String },
     ServiceAction { action: String, success: bool, detail: String },
@@ -762,7 +763,7 @@ impl DeepSearchApp {
             });
             let message = match result {
                 Ok(total) => UiMessage::SearchFinished { total },
-                Err(error) => UiMessage::Error(error.to_string()),
+                Err(error) => UiMessage::SearchError(error.to_string()),
             };
             let _ = sender.send(message);
         });
@@ -818,6 +819,15 @@ impl DeepSearchApp {
                     self.busy = false;
                     self.total = total;
                     self.message = format!("Complete · {} of {} results loaded", self.results.len(), self.total);
+                }
+                UiMessage::SearchError(error) => {
+                    self.busy = false;
+                    self.results.clear();
+                    self.total = 0;
+                    self.message = format!("Search failed; partial results discarded: {error}");
+                    if self.settings.notify_on_errors {
+                        show_notification("Search failed", &error);
+                    }
                 }
                 UiMessage::IndexError(error) => {
                     self.busy = false;
