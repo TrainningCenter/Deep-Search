@@ -1244,6 +1244,39 @@ mod database_tests {
     }
 
     #[test]
+    fn search_snapshot_revision_changes_when_content_or_media_changes() {
+        use crate::media::MediaMetadata;
+
+        let db = Database::open(":memory:").unwrap();
+        let file = sample_file("report.txt", 128);
+        db.upsert_file_with_content(&file, Some("initial searchable text")).unwrap();
+
+        let expression = SearchExpression::NameContains("report".into());
+        let (first_total, first_page, first_revision) = db.search_page_sorted_snapshot(
+            &expression, 1000, 0, SearchSortField::Name, SearchSortDirection::Ascending,
+        ).unwrap();
+        assert_eq!(first_total, 1);
+        assert_eq!(first_page.len(), 1);
+
+        db.replace_file_with_content(&file, Some("updated searchable text")).unwrap();
+        let (content_total, _, content_revision) = db.search_page_sorted_snapshot(
+            &expression, 1000, 0, SearchSortField::Name, SearchSortDirection::Ascending,
+        ).unwrap();
+        assert_eq!(content_total, first_total);
+        assert_ne!(content_revision, first_revision);
+
+        db.replace_media_metadata_batch(&[(
+            file.path.clone(),
+            Some(MediaMetadata { duration_ms: Some(12_000), ..Default::default() }),
+        )]).unwrap();
+        let (media_total, _, media_revision) = db.search_page_sorted_snapshot(
+            &expression, 1000, 0, SearchSortField::Name, SearchSortDirection::Ascending,
+        ).unwrap();
+        assert_eq!(media_total, first_total);
+        assert_ne!(media_revision, content_revision);
+    }
+
+    #[test]
     fn expands_unquoted_terms_and_keeps_quoted_terms_exact() {
         let db = Database::open(":memory:").unwrap();
         for name in ["invoice.txt", "invoices.txt", "invoicing.txt", "invoicee.txt"] {
