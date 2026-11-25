@@ -35,7 +35,7 @@ where
     let mut summary = ScanSummary::default();
     let batch_size = batch_size.max(1);
 
-    for input in paths {
+    'roots: for input in paths {
         let root = input.as_ref().to_path_buf();
         let errors_before = summary.errors;
         let mut callback_failed = false;
@@ -101,6 +101,7 @@ where
                                 if !on_batch(&batch) {
                                     summary.errors += 1;
                                     callback_failed = true;
+                                    break 'roots;
                                 }
                                 batch.clear();
                             }
@@ -117,6 +118,7 @@ where
         if !batch.is_empty() && !on_batch(&batch) {
             summary.errors += 1;
             callback_failed = true;
+            break 'roots;
         }
 
         if summary.errors == errors_before && !callback_failed {
@@ -217,6 +219,27 @@ mod tests {
         assert_eq!(batch_sizes.iter().sum::<usize>(), 17);
         assert!(batch_sizes.iter().all(|size| *size <= 4));
         assert_eq!(batch_sizes, vec![4, 4, 4, 4, 1]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stops_scanning_immediately_when_batch_callback_requests_abort() {
+        let root = create_temp_dir();
+        for index in 0..9 {
+            fs::write(root.join(format!("file-{index:02}.txt")), b"x").unwrap();
+        }
+
+        let mut callback_count = 0;
+        let report = scan_paths_batched(&[root.as_path()], 2, |batch| {
+            callback_count += 1;
+            assert_eq!(batch.len(), 2);
+            false
+        });
+
+        assert_eq!(callback_count, 1, "a rejected batch must not be retried");
+        assert_eq!(report.files_discovered, 2, "traversal must stop at the rejected batch");
+        assert_eq!(report.errors, 1);
+        assert!(report.completed_roots.is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 
