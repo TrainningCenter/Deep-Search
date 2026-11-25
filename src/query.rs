@@ -203,6 +203,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parses_source_filter() {
+        assert_eq!(
+            parse_query("source:nas").unwrap(),
+            SearchExpression::SourceContains("nas".into())
+        );
+    }
+
+    #[test]
     fn parses_duration_filters_in_seconds_minutes_and_clock_format() {
         assert_eq!(parse_query("duration>=90s").unwrap(), SearchExpression::DurationAtLeast(90_000));
         assert_eq!(parse_query("duration<=2h").unwrap(), SearchExpression::DurationAtMost(7_200_000));

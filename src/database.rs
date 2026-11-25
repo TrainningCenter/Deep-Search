@@ -902,8 +902,6 @@ impl Database {
     }
 }
 
-#[cfg(test)]}
-
 #[cfg(test)]
 mod database_tests {
     use super::*;
@@ -941,6 +939,51 @@ mod database_tests {
 
         let at_most = db.search(&SearchExpression::DurationAtMost(60_000)).unwrap();
         assert_eq!(at_most.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(), vec!["short.mp4"]);
+    }
+
+    #[test]
+    fn source_roots_can_be_excluded_and_restored_without_deleting_indexed_files() {
+        let db = Database::open(":memory:").unwrap();
+        let root = PathBuf::from("/mnt/media");
+        let nested = PathBuf::from("/mnt/media/nas");
+        db.add_index_roots(&[root.clone(), nested.clone()]).unwrap();
+
+        let local = FileRecord {
+            path: root.join("local.mp4"),
+            name: "local.mp4".into(),
+            extension: Some("mp4".into()),
+            size_bytes: 10,
+            modified_timestamp_ns: None,
+            status: IndexingStatus::Indexed,
+        };
+        let remote = FileRecord {
+            path: nested.join("remote.mp4"),
+            name: "remote.mp4".into(),
+            extension: Some("mp4".into()),
+            size_bytes: 20,
+            modified_timestamp_ns: None,
+            status: IndexingStatus::Indexed,
+        };
+        db.upsert_file(&local).unwrap();
+        db.upsert_file(&remote).unwrap();
+
+        let expression = SearchExpression::ExtensionEquals("mp4".into());
+        let results = db.search(&expression).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results.iter().find(|item| item.name == "local.mp4").unwrap().source, "/mnt/media");
+        assert_eq!(results.iter().find(|item| item.name == "remote.mp4").unwrap().source, "/mnt/media/nas");
+
+        assert!(db.set_index_root_enabled(&nested, false).unwrap());
+        assert_eq!(db.count_search_results(&expression).unwrap(), 1);
+        let filtered = db.search_page_sorted(
+            &expression, 50, 0, SearchSortField::Source, SearchSortDirection::Ascending,
+        ).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "local.mp4");
+
+        assert!(db.set_index_root_enabled(&nested, true).unwrap());
+        assert_eq!(db.count_search_results(&expression).unwrap(), 2);
+        assert_eq!(db.file_count().unwrap(), 2);
     }
 
     #[test]
