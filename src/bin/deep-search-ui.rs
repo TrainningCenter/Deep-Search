@@ -47,6 +47,15 @@ fn default_columns() -> Vec<ColumnSetting> {
         ColumnSetting { key: "extension".into(), visible: true, width: 90.0 },
         ColumnSetting { key: "size".into(), visible: true, width: 110.0 },
         ColumnSetting { key: "modified".into(), visible: false, width: 160.0 },
+        ColumnSetting { key: "duration".into(), visible: false, width: 110.0 },
+        ColumnSetting { key: "resolution".into(), visible: false, width: 120.0 },
+        ColumnSetting { key: "video_codec".into(), visible: false, width: 120.0 },
+        ColumnSetting { key: "audio_codec".into(), visible: false, width: 120.0 },
+        ColumnSetting { key: "frame_rate".into(), visible: false, width: 110.0 },
+        ColumnSetting { key: "container".into(), visible: false, width: 150.0 },
+        ColumnSetting { key: "bit_rate".into(), visible: false, width: 110.0 },
+        ColumnSetting { key: "sample_rate".into(), visible: false, width: 110.0 },
+        ColumnSetting { key: "channels".into(), visible: false, width: 90.0 },
         ColumnSetting { key: "path".into(), visible: true, width: 420.0 },
     ]
 }
@@ -82,13 +91,27 @@ impl UiSettings {
             .unwrap_or_default();
         if settings.profiles.is_empty() {
             settings.profiles.insert("Default".into(), default_profile(&["name", "extension", "size", "path"]));
-            settings.profiles.insert("Videos".into(), default_profile(&["name", "extension", "size", "modified", "path"]));
+            settings.profiles.insert("Videos".into(), default_profile(&["name", "extension", "duration", "resolution", "video_codec", "audio_codec", "frame_rate", "size", "modified", "path"]));
+            settings.profiles.insert("Audio".into(), default_profile(&["name", "extension", "duration", "audio_codec", "bit_rate", "sample_rate", "channels", "size", "path"]));
             settings.profiles.insert("Documents".into(), default_profile(&["name", "extension", "modified", "size", "path"]));
             settings.profiles.insert("Large files".into(), default_profile(&["name", "size", "extension", "path"]));
             settings.profiles.insert("NAS".into(), default_profile(&["name", "size", "modified", "path"]));
             settings.active_profile = "Default".into();
             settings.save();
         }
+        // Add newly introduced columns to existing saved profiles without
+        // changing which columns the user already chose to show.
+        let available_columns = default_columns();
+        let mut migrated = false;
+        for profile in settings.profiles.values_mut() {
+            for candidate in &available_columns {
+                if !profile.columns.iter().any(|column| column.key == candidate.key) {
+                    profile.columns.push(candidate.clone());
+                    migrated = true;
+                }
+            }
+        }
+        if migrated { settings.save(); }
         if !settings.profiles.contains_key(&settings.active_profile) {
             settings.active_profile = settings.profiles.keys().next().cloned().unwrap_or_default();
         }
@@ -741,13 +764,58 @@ impl eframe::App for DeepSearchApp {
 }
 
 fn result_column_text(result: &Value, key: &str) -> String {
+    let media = result.get("media_metadata");
     match key {
         "name" | "extension" | "path" => result.get(key).and_then(Value::as_str)
             .unwrap_or("—").to_owned(),
         "modified" => result.get("modified_timestamp_ns").and_then(Value::as_u64)
             .map(format_modified).unwrap_or_else(|| "—".to_owned()),
         "size" => format_size(result.get("size_bytes").and_then(Value::as_u64).unwrap_or(0)),
+        "duration" => media.and_then(|value| value.get("duration_ms")).and_then(Value::as_u64)
+            .map(format_duration).unwrap_or_else(|| "—".to_owned()),
+        "resolution" => match (
+            media.and_then(|value| value.get("width")).and_then(Value::as_u64),
+            media.and_then(|value| value.get("height")).and_then(Value::as_u64),
+        ) {
+            (Some(width), Some(height)) => format!("{width} × {height}"),
+            _ => "—".to_owned(),
+        },
+        "video_codec" | "audio_codec" | "container" => media
+            .and_then(|value| value.get(key)).and_then(Value::as_str)
+            .unwrap_or("—").to_owned(),
+        "frame_rate" => media.and_then(|value| value.get("frame_rate_milli")).and_then(Value::as_u64)
+            .map(|rate| format!("{:.2} fps", rate as f64 / 1000.0))
+            .unwrap_or_else(|| "—".to_owned()),
+        "bit_rate" => media.and_then(|value| value.get("bit_rate")).and_then(Value::as_u64)
+            .map(format_bit_rate).unwrap_or_else(|| "—".to_owned()),
+        "sample_rate" => media.and_then(|value| value.get("sample_rate")).and_then(Value::as_u64)
+            .map(|rate| format!("{:.1} kHz", rate as f64 / 1000.0))
+            .unwrap_or_else(|| "—".to_owned()),
+        "channels" => media.and_then(|value| value.get("channels")).and_then(Value::as_u64)
+            .map(|channels| format!("{channels} ch")).unwrap_or_else(|| "—".to_owned()),
         _ => "—".to_owned(),
+    }
+}
+
+fn format_duration(duration_ms: u64) -> String {
+    let total_seconds = duration_ms / 1000;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
+fn format_bit_rate(bits_per_second: u64) -> String {
+    if bits_per_second >= 1_000_000 {
+        format!("{:.2} Mbps", bits_per_second as f64 / 1_000_000.0)
+    } else if bits_per_second >= 1_000 {
+        format!("{:.0} kbps", bits_per_second as f64 / 1_000.0)
+    } else {
+        format!("{bits_per_second} bps")
     }
 }
 
@@ -909,6 +977,15 @@ fn column_label(key: &str, arabic: bool) -> &'static str {
             "extension" => "الامتداد",
             "size" => "الحجم",
             "modified" => "تاريخ التعديل",
+            "duration" => "المدة",
+            "resolution" => "الدقة",
+            "video_codec" => "ترميز الفيديو",
+            "audio_codec" => "ترميز الصوت",
+            "frame_rate" => "معدل الإطارات",
+            "container" => "الحاوية",
+            "bit_rate" => "معدل البت",
+            "sample_rate" => "معدل العينة",
+            "channels" => "القنوات",
             "path" => "المسار",
             _ => "عمود",
         }
@@ -918,6 +995,15 @@ fn column_label(key: &str, arabic: bool) -> &'static str {
             "extension" => "Extension",
             "size" => "Size",
             "modified" => "Modified",
+            "duration" => "Duration",
+            "resolution" => "Resolution",
+            "video_codec" => "Video codec",
+            "audio_codec" => "Audio codec",
+            "frame_rate" => "Frame rate",
+            "container" => "Container",
+            "bit_rate" => "Bit rate",
+            "sample_rate" => "Sample rate",
+            "channels" => "Channels",
             "path" => "Path",
             _ => "Column",
         }
