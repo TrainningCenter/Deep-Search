@@ -36,20 +36,25 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
 
     let (shutdown_sender, shutdown_receiver) = mpsc::channel();
     spawn_logout_monitor(watcher_database_path.clone(), shutdown_sender);
+    let mut client_threads = Vec::new();
 
     // Each client gets its own SQLite connection. WAL allows readers to query
     // while the indexing worker commits batches; writes remain serialized.
     loop {
         if shutdown_receiver.try_recv().is_ok() {
             eprintln!("Deep-Search service stopping after user logout.");
+            for worker in client_threads {
+                let _ = worker.join();
+            }
             break;
         }
         match listener.accept() {
             Ok((stream, _)) => {
+                client_threads.retain(|worker: &thread::JoinHandle<()>| !worker.is_finished());
                 let database_path = watcher_database_path.clone();
                 let watch_roots = watch_roots.clone();
                 let index_lock = Arc::clone(&index_lock);
-                thread::spawn(move || {
+                client_threads.push(thread::spawn(move || {
                     let engine = match SearchEngine::connect_existing(&database_path) {
                         Ok(engine) => engine,
                         Err(error) => {
@@ -62,7 +67,7 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
                     ) {
                         eprintln!("Service request failed: {error}");
                     }
-                });
+                }));
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(100));
