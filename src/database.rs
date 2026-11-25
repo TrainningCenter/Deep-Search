@@ -1088,7 +1088,7 @@ mod database_tests {
         let expanded = db.search(&SearchExpression::ExpandedTerm("invoice".into())).unwrap();
         let mut expanded_names = expanded.iter().map(|item| item.name.as_str()).collect::<Vec<_>>();
         expanded_names.sort_unstable();
-        assert_eq!(expanded_names, vec!["invoice.txt", "invoicing.txt", "invoices.txt"]);
+        assert_eq!(expanded_names, vec!["invoice.txt", "invoices.txt", "invoicing.txt"]);
 
         let exact = db.search(&SearchExpression::ExactTerm("invoice".into())).unwrap();
         assert_eq!(exact.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(), vec!["invoice.txt"]);
