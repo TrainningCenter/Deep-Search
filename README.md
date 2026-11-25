@@ -22,7 +22,7 @@ For development, run it with:
 cargo run --features desktop --bin deep-search-ui
 ```
 
-The desktop alpha currently provides automatic connection to the local service on launch, indexing-path entry (native folder picker and drag-and-drop paths), query input, sorting, and a resizable results table. The results view supports showing/hiding columns, changing their order, adjusting their widths, row-height control, content-based auto-fit (sampling up to 500 loaded results), and persistent named view profiles. Default profiles include Default, Videos, Documents, Large files, and NAS. Profiles are stored locally in the user's application configuration directory. An Arabic-language toggle is available for the main controls and result table direction. On Linux with the systemd helper installed, the UI also exposes runtime start/stop and a boot-startup toggle using desktop authorization. Full Arabic contextual shaping, tray integration, frozen columns, and Windows/macOS service controls inside the desktop Settings UI remain in development. The app loads an installed system Arabic font as a fallback when available. Separate macOS launchd and Windows startup-task installers are included in their platform packages.
+The desktop alpha currently provides automatic connection to the local service on launch, indexing-path entry (native folder picker and drag-and-drop paths), query input, sorting, and a resizable results table. The results view supports adding/removing/showing/hiding columns, drag-and-drop or button-based reordering, adjusting each column's width, row-height control, content-based auto-fit (sampling up to 500 loaded results), and persistent named view profiles. Default profiles include Default, Videos, Documents, Large files, and NAS. Profiles are stored locally in the user's application configuration directory. An Arabic-language toggle is available for the main controls and result table direction. On Linux with the systemd helper installed, the UI also exposes runtime start/stop and a boot-startup toggle using desktop authorization. Full Arabic contextual shaping, tray integration, frozen columns, and Windows/macOS service controls inside the desktop Settings UI remain in development. The app loads an installed system Arabic font as a fallback when available. Separate macOS launchd and Windows startup-task installers are included in their platform packages.
 
 
 
@@ -31,6 +31,7 @@ A fast, lightweight, cross-platform file indexing and search engine written in R
 ## Current capabilities
 
 - Incremental file indexing with batched SQLite writes.
+- Persistent indexing roots and automatic filesystem change monitoring (create, modify, rename, delete) with debounced targeted refreshes; a 10-minute reconciliation pass catches missed events and changes on filesystems with limited notification support.
 - SQLite-backed metadata storage and full-text content search (FTS5).
 - Search by file name, path, content, extension, file category, and size range.
 - Boolean search expressions with `AND`, `OR`, `NOT`, and parentheses.
