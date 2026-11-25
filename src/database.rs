@@ -452,6 +452,12 @@ impl Database {
                 metadata_json TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS database_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                revision INTEGER NOT NULL
+            );
+            INSERT OR IGNORE INTO database_state(id, revision) VALUES (1, 0);
+
             ",
         )?;
 
@@ -494,6 +500,34 @@ impl Database {
                 INSERT INTO files_fts(files_fts, rowid, content)
                 VALUES ('delete', old.id, old.content);
                 INSERT INTO files_fts(rowid, content) VALUES (new.id, new.content);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS files_revision_insert AFTER INSERT ON files BEGIN
+                UPDATE database_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS files_revision_update AFTER UPDATE ON files BEGIN
+                UPDATE database_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS files_revision_delete AFTER DELETE ON files BEGIN
+                UPDATE database_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS roots_revision_insert AFTER INSERT ON index_roots BEGIN
+                UPDATE database_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS roots_revision_update AFTER UPDATE ON index_roots BEGIN
+                UPDATE database_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS roots_revision_delete AFTER DELETE ON index_roots BEGIN
+                UPDATE database_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS media_revision_insert AFTER INSERT ON media_metadata BEGIN
+                UPDATE database_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS media_revision_update AFTER UPDATE ON media_metadata BEGIN
+                UPDATE database_state SET revision = revision + 1 WHERE id = 1;
+            END;
+            CREATE TRIGGER IF NOT EXISTS media_revision_delete AFTER DELETE ON media_metadata BEGIN
+                UPDATE database_state SET revision = revision + 1 WHERE id = 1;
             END;
             "
         )?;
@@ -1023,6 +1057,74 @@ impl Database {
         let mut statement = self.connection.prepare(&sql)?;
         let rows = statement.query_map(params_from_iter(values.iter()), map_search_result)?;
         rows.collect()
+    }
+
+    /// Fetch a page, its total, and the database revision from one SQLite snapshot.
+    /// Clients compare revisions between pages to reject mixed results when indexing
+    /// changes the matching dataset without changing its total count.
+    pub fn search_page_sorted_snapshot(
+        &self,
+        expression: &SearchExpression,
+        limit: u32,
+        offset: u64,
+        sort_field: SearchSortField,
+        sort_direction: SearchSortDirection,
+    ) -> Result<(u64, Vec<SearchResult>, u64)> {
+        let transaction = self.connection.unchecked_transaction()?;
+
+        let mut count_values = Vec::new();
+        let condition = compile_expression(expression, &mut count_values);
+        let enabled_sql = source_enabled_sql();
+        let total: i64 = transaction.query_row(
+            &format!("SELECT COUNT(*) FROM files WHERE ({condition}) AND {enabled_sql}"),
+            params_from_iter(count_values.iter()),
+            |row| row.get(0),
+        )?;
+
+        let mut values = Vec::new();
+        let condition = compile_expression(expression, &mut values);
+        let source_sql = source_path_sql();
+        let enabled_sql = source_enabled_sql();
+        let order_by = match sort_field {
+            SearchSortField::Relevance => name_relevance_order(expression, &mut values),
+            SearchSortField::Name => "name COLLATE NOCASE".to_string(),
+            SearchSortField::Path => "path COLLATE NOCASE".to_string(),
+            SearchSortField::Extension => "extension COLLATE NOCASE".to_string(),
+            SearchSortField::Size => "size_bytes".to_string(),
+            SearchSortField::Modified => "modified_unix".to_string(),
+            SearchSortField::Source => format!("COALESCE({source_sql}, 'Unassigned') COLLATE NOCASE"),
+        };
+        let direction = match sort_direction {
+            SearchSortDirection::Ascending => "ASC",
+            SearchSortDirection::Descending => "DESC",
+        };
+        let order_by = if sort_field == SearchSortField::Relevance {
+            format!("{order_by} {direction}, name COLLATE NOCASE {direction}, path COLLATE NOCASE {direction}")
+        } else {
+            format!("{order_by} {direction}, name COLLATE NOCASE, path COLLATE NOCASE")
+        };
+        values.push(Value::Integer(limit.clamp(1, 1000) as i64));
+        values.push(Value::Integer(offset.min(i64::MAX as u64) as i64));
+        let sql = format!(
+            "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path), COALESCE({source_sql}, 'Unassigned') FROM files
+             WHERE ({condition}) AND {enabled_sql}
+             ORDER BY {order_by}
+             LIMIT ?{} OFFSET ?{}",
+            values.len() - 1,
+            values.len()
+        );
+        let results = {
+            let mut statement = transaction.prepare(&sql)?;
+            let rows = statement.query_map(params_from_iter(values.iter()), map_search_result)?;
+            rows.collect::<Result<Vec<_>>>()?
+        };
+        let revision: i64 = transaction.query_row(
+            "SELECT revision FROM database_state WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        transaction.commit()?;
+        Ok((total.max(0) as u64, results, revision.max(0) as u64))
     }
 
     /// Count all matches without loading their file records into memory.

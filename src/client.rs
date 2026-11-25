@@ -86,6 +86,7 @@ impl ServiceClient {
     {
         let mut offset = 0_u64;
         let mut expected_total = None;
+        let mut expected_revision = None;
 
         loop {
             let response = self.request(json!({
@@ -103,6 +104,15 @@ impl ServiceClient {
                 Some(expected) if expected != total =>
                     return Err("Search result total changed while fetching batches".into()),
                 None => expected_total = Some(total),
+                _ => {}
+            }
+
+            let revision = response.get("revision").and_then(Value::as_u64)
+                .ok_or("Search response is missing a valid database revision")?;
+            match expected_revision {
+                Some(expected) if expected != revision =>
+                    return Err("Search index changed while fetching batches; retry the search for a consistent result set".into()),
+                None => expected_revision = Some(revision),
                 _ => {}
             }
 
@@ -197,6 +207,7 @@ mod tests {
                     "data": {
                         "results": results,
                         "total": 2505,
+                        "revision": 7,
                         "limit": 1000,
                         "offset": offset,
                         "has_more": offset + count < 2505
@@ -232,6 +243,7 @@ mod tests {
                 "data": {
                     "results": [{"name": "docker-smoke.txt"}],
                     "total": 1,
+                    "revision": 7,
                     "limit": 1000,
                     "offset": 0,
                     "has_more": false
@@ -252,6 +264,39 @@ mod tests {
     }
 
     #[test]
+    fn rejects_dataset_changes_between_batches_even_when_total_is_unchanged() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            for (offset, revision) in [(0_u64, 10_u64), (1000, 11)] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut line = String::new();
+                BufReader::new(stream.try_clone().unwrap()).read_line(&mut line).unwrap();
+                let request: Value = serde_json::from_str(&line).unwrap();
+                assert_eq!(request["offset"], offset);
+                let results: Vec<Value> = (0..1000).map(|index| json!({
+                    "name": format!("item-{}-{index}", offset)
+                })).collect();
+                serde_json::to_writer(&mut stream, &json!({
+                    "ok": true,
+                    "data": {
+                        "results": results,
+                        "total": 2000,
+                        "revision": revision,
+                        "has_more": true
+                    }
+                })).unwrap();
+                stream.write_all(b"\n").unwrap();
+            }
+        });
+
+        let error = ServiceClient::new(address.to_string())
+            .search_all("item", "name", "asc").unwrap_err();
+        server.join().unwrap();
+        assert!(error.to_string().contains("index changed while fetching batches"));
+    }
+
+    #[test]
     fn rejects_inconsistent_or_incomplete_batch_sequences() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -264,6 +309,7 @@ mod tests {
                 "data": {
                     "results": [{"name": "one.txt"}],
                     "total": 2,
+                    "revision": 7,
                     "has_more": false
                 }
             })).unwrap();

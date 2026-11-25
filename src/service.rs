@@ -570,13 +570,13 @@ fn handle_request_with_context(
                     "desc" | "descending" => SearchSortDirection::Descending,
                     _ => return Err("Order must be asc or desc".into()),
                 };
-                let total = engine.count_search_results(&expression)?;
-                let results = engine.search_page_sorted(
+                let (total, results, revision) = engine.search_page_sorted_snapshot(
                     &expression, limit as u32, offset, sort, order,
                 )?;
                 Ok(json!({
                     "results": results,
                     "total": total,
+                    "revision": revision,
                     "limit": limit,
                     "offset": offset,
                     "has_more": offset.saturating_add(results.len() as u64) < total

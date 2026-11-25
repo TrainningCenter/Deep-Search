@@ -266,6 +266,19 @@ impl SearchEngine {
         )
     }
 
+    pub fn search_page_sorted_snapshot(
+        &self,
+        expression: &SearchExpression,
+        limit: u32,
+        offset: u64,
+        sort_field: SearchSortField,
+        sort_direction: SearchSortDirection,
+    ) -> Result<(u64, Vec<SearchResult>, u64)> {
+        self.database.search_page_sorted_snapshot(
+            expression, limit, offset, sort_field, sort_direction,
+        )
+    }
+
     pub fn count_search_results(&self, expression: &SearchExpression) -> Result<u64> {
         self.database.count_search_results(expression)
     }
