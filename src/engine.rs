@@ -150,6 +150,12 @@ impl SearchEngine {
                 }
             }
 
+            // A database read failure makes the current scan unreliable. Abort
+            // before doing more extraction or issuing writes for this batch.
+            if indexing_failed {
+                return false;
+            }
+
             let extracted_batch: Vec<_> = changed_files.into_par_iter()
                 .map(|file| {
                     let content = extract_text(&file.path, file.size_bytes);
@@ -185,7 +191,9 @@ impl SearchEngine {
                     }
                 }
             }
-            true
+            // Stop traversal immediately after any persistence failure. The scan
+            // is discarded below, so unseen paths are never treated as removed.
+            !indexing_failed
         });
 
         report.files_discovered = scan.files_discovered.saturating_sub(internal_files_skipped);
