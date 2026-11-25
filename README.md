@@ -22,7 +22,7 @@ For development, run it with:
 cargo run --features desktop --bin deep-search-ui
 ```
 
-The desktop alpha currently provides connection/status, indexing-path entry, query input, sorting, and a resizable results table. Saved view profiles, full column management, Arabic RTL, tray integration, and graphical folder picking are not implemented yet.
+The desktop alpha currently provides automatic connection to the local service on launch, indexing-path entry, query input, sorting, and a resizable results table. The results view supports showing/hiding columns, changing their order, adjusting their widths, row-height control, auto-fit defaults, and persistent named view profiles. Default profiles include Default, Videos, Documents, Large files, and NAS. Profiles are stored locally in the user's application configuration directory. An Arabic-language toggle is available for the main controls; full application-wide RTL layout, tray integration, graphical folder picking, and frozen columns remain in development.
 
 
 
