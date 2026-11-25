@@ -597,7 +597,7 @@ impl Database {
         values.push(Value::Integer(limit.clamp(1, 1000) as i64));
         values.push(Value::Integer(offset.min(i64::MAX as u64) as i64));
         let sql = format!(
-            "SELECT path, name, extension, size_bytes FROM files
+            "SELECT path, name, extension, size_bytes, modified_unix FROM files
              WHERE {condition}
              ORDER BY {order_by}
              LIMIT ?{} OFFSET ?{}",
@@ -641,7 +641,7 @@ impl Database {
         if term.chars().count() >= 3 {
             let phrase = format!("\"{}\"", term.replace('"', "\"\""));
             let mut statement = self.connection.prepare(
-                "SELECT path, name, extension, size_bytes FROM files
+                "SELECT path, name, extension, size_bytes, modified_unix FROM files
                  WHERE id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?1)
                  ORDER BY name COLLATE NOCASE"
             )?;
@@ -665,7 +665,7 @@ impl Database {
                 .replace('_', "\\_");
             let pattern = format!("%{escaped}%");
             let mut statement = self.connection.prepare(
-                "SELECT path, name, extension, size_bytes FROM files
+                "SELECT path, name, extension, size_bytes, modified_unix FROM files
                  WHERE content LIKE ?1 ESCAPE '\\' COLLATE NOCASE
                  ORDER BY name COLLATE NOCASE"
             )?;
@@ -700,7 +700,7 @@ impl Database {
 
         let mut statement = self.connection.prepare(
             "
-            SELECT path, name, extension, size_bytes
+            SELECT path, name, extension, size_bytes, modified_unix
             FROM files
             WHERE name LIKE ?1 ESCAPE '\\' COLLATE NOCASE
             ORDER BY
@@ -740,7 +740,7 @@ impl Database {
 
         let mut statement = self.connection.prepare(
             "
-            SELECT path, name, extension, size_bytes
+            SELECT path, name, extension, size_bytes, modified_unix
             FROM files
             WHERE extension = ?1 COLLATE NOCASE
             ORDER BY name COLLATE NOCASE
@@ -774,7 +774,7 @@ impl Database {
 
         let mut statement = self.connection.prepare(
             "
-            SELECT path, name, extension, size_bytes
+            SELECT path, name, extension, size_bytes, modified_unix
             FROM files
             WHERE (?1 IS NULL OR size_bytes >= ?1)
               AND (?2 IS NULL OR size_bytes <= ?2)
