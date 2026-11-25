@@ -221,7 +221,7 @@ The macOS package includes a LaunchDaemon that starts before login, runs under t
 sudo bash packaging/macos/launchd/install-service.sh "$USER" ./deep-search
 ```
 
-The installer also installs `deep-search-service` in `/usr/local/bin`. Check or control the service:
+When `deep-search-ui` is present beside the engine binary in the extracted package, the installer also creates `/Applications/Deep-Search.app`. The installer also installs `deep-search-service` in `/usr/local/bin`. Launch the desktop app from Applications or with `open -a Deep-Search`. Check or control the service:
 
 ```bash
 deep-search-service status
@@ -242,7 +242,7 @@ sudo bash packaging/macos/launchd/uninstall-service.sh
 
 ### Windows background service (Task Scheduler)
 
-The Windows package includes an elevated PowerShell installer. It registers a Task Scheduler task triggered at system startup, runs the engine under the selected account without requiring an interactive login, and restarts it after failure:
+The Windows package includes an elevated PowerShell installer. It registers a Task Scheduler task triggered at system startup, runs the engine under the selected account without requiring an interactive login, and restarts it after failure. When `deep-search-ui.exe` is beside the engine binary, it also installs the desktop application and creates a Start Menu shortcut:
 
 ```powershell
 .\packaging\windows\task-scheduler\install-service.ps1 -UserName $env:USERNAME -BinaryPath .\deep-search.exe
