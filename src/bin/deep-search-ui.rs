@@ -505,6 +505,18 @@ impl DeepSearchApp {
                     changed |= ui.add(egui::TextEdit::singleline(&mut condition.value)
                         .desired_width(130.0)
                         .hint_text(if condition.field == "size" { "e.g. 2GB" } else if condition.field == "duration" { "e.g. 90s, 2m, 1:30" } else { "Value" })).changed();
+                    if condition.field == "duration" {
+                        egui::ComboBox::from_id_salt(("duration_presets", index))
+                            .selected_text("Presets")
+                            .show_ui(ui, |ui| {
+                                for preset in ["30s", "1m", "5m", "10m", "15m", "30m", "45m", "1h", "2h", "4h", "8h"] {
+                                    if ui.selectable_label(condition.value == preset, preset).clicked() {
+                                        condition.value = preset.to_owned();
+                                        changed = true;
+                                    }
+                                }
+                            });
+                    }
                     if ui.small_button("↑").clicked() && index > 0 { move_request = Some((index, index - 1)); }
                     if ui.small_button("↓").clicked() && index + 1 < condition_count { move_request = Some((index, index + 1)); }
                     if ui.small_button("×").clicked() { remove_at = Some(index); }
