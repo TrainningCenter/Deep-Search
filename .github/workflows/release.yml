@@ -232,6 +232,7 @@ jobs:
           test -s dist/deep-search-windows-x64.sha256
           test -s dist/deep-search-macos-arm64.sha256
           test -s dist/deep-search-docker-linux-x64.sha256
+          (cd dist && sha256sum --check *.sha256)
 
       - name: Publish prerelease on GitHub Releases
         uses: softprops/action-gh-release@v2
