@@ -266,12 +266,13 @@ impl DeepSearchApp {
         ui.heading(if self.arabic { "إعدادات الأعمدة" } else { "Columns & layout" });
         let mut changed = false;
         let mut move_request: Option<(usize, isize)> = None;
+        let arabic = self.arabic;
         let columns = &mut self.active_profile_mut().columns;
         let column_count = columns.len();
         for index in 0..column_count {
             ui.horizontal(|ui| {
                 let column = &mut columns[index];
-                let label = column_label(&column.key, self.arabic);
+                let label = column_label(&column.key, arabic);
                 changed |= ui.checkbox(&mut column.visible, label).changed();
                 ui.add(egui::DragValue::new(&mut column.width).range(60.0..=1200.0).speed(5.0).suffix(" px"));
                 if ui.small_button("↑").clicked() && index > 0 {
