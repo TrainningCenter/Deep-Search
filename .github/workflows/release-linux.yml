@@ -34,6 +34,15 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Validate service scripts and run tests
+        run: |
+          bash -n packaging/linux/install.sh packaging/linux/systemd/install-service.sh packaging/linux/systemd/uninstall-service.sh packaging/linux/systemd/deep-search-service.sh packaging/linux/systemd/test-service-control.sh
+          bash -n packaging/macos/launchd/install-service.sh packaging/macos/launchd/uninstall-service.sh packaging/macos/launchd/deep-search-service.sh packaging/macos/launchd/test-service-control.sh
+          bash packaging/linux/systemd/test-service-control.sh
+          bash packaging/macos/launchd/test-service-control.sh
+          cargo test --all-targets
+          cargo check --features desktop --bin deep-search-ui
+
       - name: Build engine and desktop application
         run: cargo build --release --features desktop --bins
 
