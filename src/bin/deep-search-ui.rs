@@ -231,6 +231,20 @@ impl DeepSearchApp {
         });
     }
 
+    fn pick_folder(&mut self) {
+        let sender = self.sender.clone();
+        self.busy = true;
+        self.message = if self.arabic {
+            "جارٍ فتح نافذة اختيار المجلد…"
+        } else {
+            "Opening folder picker…"
+        }.to_owned();
+        thread::spawn(move || {
+            let paths = native_folder_picker();
+            let _ = sender.send(UiMessage::PickedPaths(paths));
+        });
+    }
+
     fn check_status(&mut self) {
         let client = self.client();
         let sender = self.sender.clone();
