@@ -103,8 +103,8 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ matrix.ui_binary }} dist/
           cp README.md dist/
           if [ "${{ runner.os }}" = "Linux" ]; then
-            mkdir -p dist/packaging/linux
-            cp -R packaging/linux/systemd dist/packaging/linux/
+            mkdir -p dist/packaging
+            cp -R packaging/linux dist/packaging/
           elif [ "${{ runner.os }}" = "macOS" ]; then
             mkdir -p dist/packaging/macos
             cp -R packaging/macos/launchd dist/packaging/macos/
