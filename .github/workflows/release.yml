@@ -91,6 +91,9 @@ jobs:
       - name: Run tests
         run: cargo test --all-targets
 
+      - name: Run desktop UI and Arabic shaping tests
+        run: cargo test --features desktop --bin deep-search-ui --target ${{ matrix.target }}
+
       - name: Build release binary
         run: cargo build --release --features desktop --bins --target ${{ matrix.target }}
 
