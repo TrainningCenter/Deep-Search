@@ -179,6 +179,7 @@ struct DeepSearchApp {
     reset_table_layout: bool,
     tray_icon: Option<TrayIcon>,
     tray_checked: bool,
+    tray_event_handler_started: bool,
     exit_requested: bool,
     settings_window_open: bool,
 }
@@ -215,6 +216,7 @@ impl Default for DeepSearchApp {
             reset_table_layout: false,
             tray_icon: None,
             tray_checked: false,
+            tray_event_handler_started: false,
             exit_requested: false,
             settings_window_open: false,
         }
@@ -263,10 +265,13 @@ impl DeepSearchApp {
             Ok(icon) => {
                 self.tray_icon = Some(icon);
 
+                // tray-icon's event callbacks are process-global; register them
+                // once even if the user disables and later re-enables the tray.
+                if !self.tray_event_handler_started {
                 // Forward tray callbacks through the egui context so the native
                 // event loop wakes even when the main window is hidden.
-                let tray_ctx = ctx.clone();
-                TrayIconEvent::set_event_handler(Some(move |event| {
+                    let tray_ctx = ctx.clone();
+                    TrayIconEvent::set_event_handler(Some(move |event| {
                     if matches!(event,
                         TrayIconEvent::Click {
                             button: MouseButton::Left,
@@ -282,10 +287,9 @@ impl DeepSearchApp {
                     }
                     tray_ctx.request_repaint();
                 }));
-
-                let menu_sender = self.sender.clone();
-                let menu_ctx = ctx.clone();
-                MenuEvent::set_event_handler(Some(move |event| {
+                    let menu_sender = self.sender.clone();
+                    let menu_ctx = ctx.clone();
+                    MenuEvent::set_event_handler(Some(move |event| {
                     // egui 0.31 does not run App::update for a hidden root
                     // viewport. Restore it before dispatching the action so
                     // quick controls are handled reliably on every platform.
@@ -294,6 +298,8 @@ impl DeepSearchApp {
                     let _ = menu_sender.send(UiMessage::TrayMenu(event.id.0));
                     menu_ctx.request_repaint();
                 }));
+                    self.tray_event_handler_started = true;
+                }
             }
             Err(error) => {
                 self.message = format!("System tray is unavailable: {error}");
@@ -1390,8 +1396,15 @@ fn create_tray_icon_image() -> Result<TrayIconImage, tray_icon::BadIcon> {
             let dy = y as i32 - 12;
             let distance = dx * dx + dy * dy;
             let lens_ring = (58..=116).contains(&distance);
-            let handle = (x >= 20 && x <= 27 && y >= 20 && y <= 27
-                && (x as i32 - y as i32).abs() <= 2);
+            let handle = x >= 20 && x <= 27 && y >= 20 && y <= 27
+                && (x as i32 - y as i32).abs() <= 2;
+            if distance <= 225 {
+                let offset = (y * SIZE + x) * 4;
+                rgba[offset] = 35;
+                rgba[offset + 1] = 100;
+                rgba[offset + 2] = 190;
+                rgba[offset + 3] = 255;
+            }
             if lens_ring || handle {
                 let offset = (y * SIZE + x) * 4;
                 rgba[offset] = 245;
