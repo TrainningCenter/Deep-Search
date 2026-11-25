@@ -1,3 +1,4 @@
+use crate::database::{SearchSortDirection, SearchSortField};
 use crate::engine::SearchEngine;
 use crate::query::parse_query;
 use serde_json::{json, Value};
@@ -86,8 +87,36 @@ fn handle_request(input: &str, engine: &SearchEngine) -> Value {
                 let query = request.get("query").and_then(Value::as_str)
                     .ok_or("Missing string field: query")?;
                 let expression = parse_query(query)?;
-                let results = engine.search_page(&expression, 100, 0)?;
-                Ok(json!({"results": results, "limit": 100}))
+                let limit = request.get("limit").and_then(Value::as_u64).unwrap_or(100);
+                if !(1..=1000).contains(&limit) {
+                    return Err("Search limit must be between 1 and 1000".into());
+                }
+                let offset = request.get("offset").and_then(Value::as_u64).unwrap_or(0);
+                let sort = match request.get("sort").and_then(Value::as_str).unwrap_or("relevance") {
+                    "relevance" => SearchSortField::Relevance,
+                    "name" => SearchSortField::Name,
+                    "path" => SearchSortField::Path,
+                    "extension" | "ext" => SearchSortField::Extension,
+                    "size" => SearchSortField::Size,
+                    "modified" | "date" => SearchSortField::Modified,
+                    _ => return Err("Sort must be relevance, name, path, extension, size, or modified".into()),
+                };
+                let order = match request.get("order").and_then(Value::as_str).unwrap_or("asc") {
+                    "asc" | "ascending" => SearchSortDirection::Ascending,
+                    "desc" | "descending" => SearchSortDirection::Descending,
+                    _ => return Err("Order must be asc or desc".into()),
+                };
+                let total = engine.count_search_results(&expression)?;
+                let results = engine.search_page_sorted(
+                    &expression, limit as u32, offset, sort, order,
+                )?;
+                Ok(json!({
+                    "results": results,
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": offset.saturating_add(results.len() as u64) < total
+                }))
             }
             "content" => {
                 let term = request.get("term").and_then(Value::as_str)
@@ -127,6 +156,35 @@ mod tests {
         let response = handle_request(r#"{"command":"not-a-command"}"#, &engine);
         assert_eq!(response["ok"], false);
         assert!(response["error"].as_str().unwrap().contains("Unknown command"));
+
+        drop(engine);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn search_api_supports_pagination_and_sorting() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let db_path = std::env::temp_dir().join(format!(
+            "deep-search-service-page-{}-{unique}.sqlite", std::process::id()
+        ));
+        let engine = SearchEngine::open(&db_path).unwrap();
+        let response = handle_request(
+            r#"{"command":"search","query":"name:report","limit":25,"offset":10,"sort":"size","order":"desc"}"#,
+            &engine,
+        );
+        assert_eq!(response["ok"], true);
+        assert_eq!(response["data"]["limit"], 25);
+        assert_eq!(response["data"]["offset"], 10);
+        assert_eq!(response["data"]["total"], 0);
+        assert_eq!(response["data"]["has_more"], false);
+
+        let invalid = handle_request(
+            r#"{"command":"search","query":"name:report","limit":1001}"#,
+            &engine,
+        );
+        assert_eq!(invalid["ok"], false);
+        assert!(invalid["error"].as_str().unwrap().contains("between 1 and 1000"));
 
         drop(engine);
         let _ = std::fs::remove_file(db_path);
