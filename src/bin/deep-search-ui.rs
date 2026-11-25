@@ -328,9 +328,14 @@ impl DeepSearchApp {
                 for column in &columns {
                     row.col(|ui| {
                         match column.key.as_str() {
-                            "name" | "extension" | "path" | "modified" => {
+                            "name" | "extension" | "path" => {
                                 let value = result.get(&column.key).and_then(Value::as_str).unwrap_or("—");
                                 ui.add(egui::Label::new(value).truncate());
+                            }
+                            "modified" => {
+                                let value = result.get("modified_timestamp_ns").and_then(Value::as_u64)
+                                    .map(format_modified).unwrap_or_else(|| "—".to_owned());
+                                ui.label(value);
                             }
                             "size" => {
                                 let size = result.get("size_bytes").and_then(Value::as_u64).unwrap_or(0);
@@ -426,6 +431,25 @@ impl eframe::App for DeepSearchApp {
 
         if self.busy { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
     }
+}
+
+fn format_modified(timestamp_ns: u64) -> String {
+    let seconds = (timestamp_ns / 1_000_000_000) as i64;
+    let days = seconds.div_euclid(86_400);
+    let day_seconds = seconds.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    let hour = day_seconds / 3_600;
+    let minute = (day_seconds % 3_600) / 60;
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02} UTC")
 }
 
 fn format_size(bytes: u64) -> String {
