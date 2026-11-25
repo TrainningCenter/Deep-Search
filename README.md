@@ -7,6 +7,7 @@ GitHub Actions builds precompiled desktop packages for Linux x86_64, Windows x64
 - Linux: `deep-search-linux-x64`
 - Windows: `deep-search-windows-x64`
 - macOS Apple Silicon: `deep-search-macos-arm64`
+- Docker service (Linux x64): `deep-search-docker-linux-x64`
 
 For Linux, extract the downloaded archive, open a terminal in the extracted directory, and install the desktop application and background service with:
 
