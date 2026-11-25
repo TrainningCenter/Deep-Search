@@ -25,6 +25,7 @@ $databasePath = Join-Path $dataDirectory "index.sqlite"
 
 New-Item -ItemType Directory -Force -Path $installDirectory, $dataDirectory | Out-Null
 Copy-Item -LiteralPath $resolvedBinary -Destination $installedBinary -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "deep-search-service.ps1") -Destination (Join-Path $installDirectory "deep-search-service.ps1") -Force
 $grant = "${UserName}:(OI)(CI)M"
 & icacls.exe $dataDirectory /inheritance:r /grant:r $grant "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" | Out-Null
 if ($LASTEXITCODE -ne 0) {
