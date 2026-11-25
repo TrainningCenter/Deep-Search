@@ -1406,6 +1406,28 @@ mod database_tests {
     }
 
     #[test]
+    fn stop_on_logout_preference_survives_service_restarts() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "deep-search-logout-setting-{}-{unique}", std::process::id()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let path = base.join("index.sqlite");
+
+        {
+            let db = Database::open(&path).unwrap();
+            db.set_stop_on_logout(true).unwrap();
+        }
+        {
+            let db = Database::connect_existing(&path).unwrap();
+            assert!(db.stop_on_logout().unwrap());
+        }
+
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
     fn stores_media_metadata_and_returns_it_with_search_results() {
         let db = Database::open(":memory:").unwrap();
         let file = sample_file("sample-video.mp4", 1024);
