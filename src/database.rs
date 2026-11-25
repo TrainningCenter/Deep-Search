@@ -1376,4 +1376,31 @@ mod database_tests {
         assert_eq!(db.search_by_name("sibling").unwrap().len(), 1);
     }
 
+    #[test]
+    fn stores_media_metadata_and_returns_it_with_search_results() {
+        let db = Database::open(":memory:").unwrap();
+        let file = sample_file("sample-video.mp4", 1024);
+        db.upsert_file(&file).unwrap();
+        let metadata = MediaMetadata {
+            duration_ms: Some(12_345),
+            width: Some(1920),
+            height: Some(1080),
+            video_codec: Some("h264".into()),
+            audio_codec: Some("aac".into()),
+            frame_rate_milli: Some(29_970),
+            container: Some("mov,mp4".into()),
+            bit_rate: Some(2_500_000),
+            sample_rate: Some(48_000),
+            channels: Some(2),
+        };
+        db.replace_media_metadata_batch(&[(file.path.clone(), Some(metadata.clone()))]).unwrap();
+        let results = db.search_by_name("sample-video").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].media_metadata, Some(metadata));
+
+        db.replace_media_metadata_batch(&[(file.path.clone(), None)]).unwrap();
+        let results = db.search_by_name("sample-video").unwrap();
+        assert_eq!(results[0].media_metadata, None);
+    }
+
 }
