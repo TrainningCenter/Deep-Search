@@ -45,6 +45,8 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
     loop {
         if shutdown_receiver.try_recv().is_ok() {
             eprintln!("Deep-Search service stopping after user logout.");
+            // Release any worker waiting at a pause boundary before joining it.
+            indexing_paused.store(false, std::sync::atomic::Ordering::Release);
             for worker in client_threads {
                 let _ = worker.join();
             }
