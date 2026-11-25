@@ -1,6 +1,6 @@
 
 use crate::content::extract_text;
-use crate::database::{Database, SearchExpression, SearchResult};
+use crate::database::{Database, SearchExpression, SearchResult, SearchSortDirection, SearchSortField};
 use crate::indexer::scan_paths_batched;
 use rusqlite::Result;
 use std::path::Path;
@@ -116,6 +116,19 @@ impl SearchEngine {
         offset: u64,
     ) -> Result<Vec<SearchResult>> {
         self.database.search_page(expression, limit, offset)
+    }
+
+    pub fn search_page_sorted(
+        &self,
+        expression: &SearchExpression,
+        limit: u32,
+        offset: u64,
+        sort_field: SearchSortField,
+        sort_direction: SearchSortDirection,
+    ) -> Result<Vec<SearchResult>> {
+        self.database.search_page_sorted(
+            expression, limit, offset, sort_field, sort_direction,
+        )
     }
 
     pub fn count_search_results(&self, expression: &SearchExpression) -> Result<u64> {
