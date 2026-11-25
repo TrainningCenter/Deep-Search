@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use tray_icon::{menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem}, Icon as TrayIconImage, TrayIcon, TrayIconBuilder};
 
 enum UiMessage {
     Status(Value),
@@ -38,10 +39,16 @@ struct ViewProfile {
 
 fn default_frozen_columns() -> usize { 1 }
 
+fn default_enabled() -> bool { true }
+
 #[derive(Default, Serialize, Deserialize)]
 struct UiSettings {
     profiles: BTreeMap<String, ViewProfile>,
     active_profile: String,
+    #[serde(default = "default_enabled")]
+    tray_enabled: bool,
+    #[serde(default = "default_enabled")]
+    close_to_tray: bool,
 }
 
 fn default_columns() -> Vec<ColumnSetting> {
@@ -158,6 +165,10 @@ struct DeepSearchApp {
     service_checked: bool,
     dragged_column: Option<usize>,
     reset_table_layout: bool,
+    tray_icon: Option<TrayIcon>,
+    tray_checked: bool,
+    exit_requested: bool,
+    settings_window_open: bool,
 }
 
 impl Default for DeepSearchApp {
@@ -190,6 +201,10 @@ impl Default for DeepSearchApp {
             service_checked: false,
             dragged_column: None,
             reset_table_layout: false,
+            tray_icon: None,
+            tray_checked: false,
+            exit_requested: false,
+            settings_window_open: false,
         }
     }
 }
@@ -197,6 +212,76 @@ impl Default for DeepSearchApp {
 impl DeepSearchApp {
     fn client(&self) -> ServiceClient {
         ServiceClient::new(self.service_address.trim().to_owned())
+    }
+
+    fn create_tray_icon(&mut self) {
+        if self.tray_checked || !self.settings.tray_enabled {
+            return;
+        }
+        self.tray_checked = true;
+        let open = MenuItem::with_id("open", "Open Deep-Search", true, None);
+        let pause = MenuItem::with_id("pause_resume", "Pause / Resume Indexing", true, None);
+        let engine = MenuItem::with_id("toggle_engine", "Start / Stop Engine", true, None);
+        let settings = MenuItem::with_id("settings", "Settings", true, None);
+        let exit = MenuItem::with_id("exit", "Exit", true, None);
+        let separator_one = PredefinedMenuItem::separator();
+        let separator_two = PredefinedMenuItem::separator();
+        let menu = match Menu::with_items(&[
+            &open, &separator_one, &pause, &engine, &separator_two, &settings, &exit,
+        ]) {
+            Ok(menu) => menu,
+            Err(error) => {
+                self.message = format!("Could not create tray menu: {error}");
+                return;
+            }
+        };
+        let icon = match create_tray_icon_image() {
+            Ok(icon) => icon,
+            Err(error) => {
+                self.message = format!("Could not create tray icon image: {error}");
+                return;
+            }
+        };
+        match TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_tooltip("Deep-Search")
+            .with_icon(icon)
+            .build()
+        {
+            Ok(icon) => self.tray_icon = Some(icon),
+            Err(error) => {
+                self.message = format!("System tray is unavailable: {error}");
+            }
+        }
+    }
+
+    fn process_tray_events(&mut self, ctx: &egui::Context) {
+        while let Ok(event) = MenuEvent::receiver().try_recv() {
+            match event.id.0.as_str() {
+                "open" => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                "pause_resume" => {
+                    if let Some(paused) = self.indexing_paused {
+                        self.set_indexing_paused(!paused);
+                    } else {
+                        self.check_status();
+                    }
+                }
+                "toggle_engine" => {
+                    let action = if self.service_active == Some(true) { "stop" } else { "start" };
+                    self.control_system_service(action);
+                }
+                "settings" => {
+                    self.settings_window_open = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                "exit" => self.exit_requested = true,
+                _ => {}
+            }
+        }
     }
 
     fn active_profile(&self) -> &ViewProfile {
@@ -714,6 +799,18 @@ impl TableDelegate for ResultsTableDelegate<'_> {
 impl eframe::App for DeepSearchApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.receive_messages();
+        self.create_tray_icon();
+        self.process_tray_events(ctx);
+        let close_requested = ctx.input(|input| input.viewport().close_requested());
+        if close_requested && !self.exit_requested {
+            if self.settings.close_to_tray && self.tray_icon.is_some() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            }
+        }
+        if self.exit_requested {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         if !self.service_checked {
             self.service_checked = true;
             self.check_system_service();
@@ -879,9 +976,36 @@ impl eframe::App for DeepSearchApp {
             ui.with_layout(
                 if self.arabic { egui::Layout::top_down(egui::Align::Max) }
                 else { egui::Layout::top_down(egui::Align::Min) },
-                |ui| egui::ScrollArea::vertical().show(ui, |ui| self.render_column_controls(ui)),
+                |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        ui.heading(if self.arabic { "إعدادات التطبيق" } else { "Application settings" });
+                        let tray_before = self.settings.tray_enabled;
+                        ui.checkbox(&mut self.settings.tray_enabled, if self.arabic { "إظهار أيقونة شريط النظام" } else { "Show system tray icon" });
+                        ui.checkbox(&mut self.settings.close_to_tray, if self.arabic { "إخفاء النافذة عند الإغلاق" } else { "Close window to tray" });
+                        if tray_before != self.settings.tray_enabled {
+                            if self.settings.tray_enabled {
+                                self.tray_checked = false;
+                            } else {
+                                self.tray_icon = None;
+                                self.tray_checked = true;
+                            }
+                            self.persist_settings();
+                        }
+                        self.persist_settings();
+                        ui.separator();
+                        self.render_column_controls(ui);
+                    });
+                },
             );
         });
+
+        if self.settings_window_open {
+            egui::Window::new(if self.arabic { "الإعدادات" } else { "Settings" })
+                .open(&mut self.settings_window_open)
+                .show(ctx, |ui| {
+                    ui.label(if self.arabic { "يمكنك ضبط سلوك شريط النظام من لوحة إعدادات التطبيق." } else { "Configure tray visibility and close-to-tray behavior in the application settings panel." });
+                });
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.with_layout(
@@ -900,7 +1024,9 @@ impl eframe::App for DeepSearchApp {
             );
         });
 
-        if self.busy { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
+        if self.busy || self.tray_icon.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
     }
 }
 
@@ -1209,6 +1335,29 @@ fn configure_arabic_font(ctx: &egui::Context) {
     fonts.families.entry(egui::FontFamily::Proportional)
         .or_default().push("deep_search_arabic_fallback".to_owned());
     ctx.set_fonts(fonts);
+}
+
+fn create_tray_icon_image() -> Result<TrayIconImage, tray_icon::BadIcon> {
+    const SIZE: usize = 32;
+    let mut rgba = vec![0_u8; SIZE * SIZE * 4];
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let dx = x as i32 - 12;
+            let dy = y as i32 - 12;
+            let distance = dx * dx + dy * dy;
+            let lens_ring = (58..=116).contains(&distance);
+            let handle = (x >= 20 && x <= 27 && y >= 20 && y <= 27
+                && (x as i32 - y as i32).abs() <= 2);
+            if lens_ring || handle {
+                let offset = (y * SIZE + x) * 4;
+                rgba[offset] = 245;
+                rgba[offset + 1] = 248;
+                rgba[offset + 2] = 255;
+                rgba[offset + 3] = 255;
+            }
+        }
+    }
+    TrayIconImage::from_rgba(rgba, SIZE as u32, SIZE as u32)
 }
 
 fn format_size(bytes: u64) -> String {
