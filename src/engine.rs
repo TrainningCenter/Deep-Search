@@ -309,6 +309,39 @@ mod content_indexing_tests {
     }
 
     #[test]
+    fn indexing_waits_at_batch_boundaries_while_paused() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "deep-search-pause-{}-{unique}", std::process::id()
+        ));
+        let root = base.join("files");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("paused.txt"), b"resume me").unwrap();
+
+        let database_path = base.join("index.sqlite");
+        drop(SearchEngine::open(&database_path).unwrap());
+        let paused = Arc::new(AtomicBool::new(true));
+        let engine = SearchEngine::connect_existing_with_indexing_state(
+            &database_path, Arc::clone(&paused),
+        ).unwrap();
+        let worker = thread::spawn(move || engine.index_paths(&[root.as_path()]));
+
+        thread::sleep(Duration::from_millis(250));
+        assert!(!worker.is_finished(), "indexing must remain paused until resumed");
+        paused.store(false, Ordering::Release);
+        let report = worker.join().unwrap();
+        assert_eq!(report.errors, 0);
+        assert_eq!(report.files_saved, 1);
+
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
     fn reads_supported_utf8_text_files() {
         let path = temporary_file("txt", "searchable document text".as_bytes());
         let content = extract_text(&path, 24);
