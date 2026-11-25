@@ -8,7 +8,7 @@ use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{atomic::AtomicBool, mpsc, Arc, Mutex};
+use std::sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -262,9 +262,13 @@ fn spawn_filesystem_watcher(
                 return;
             }
         };
-        let (event_sender, event_receiver) = mpsc::channel();
+        // Filesystem providers can emit event storms. Keep the queue bounded and
+        // fall back to a full reconciliation if notifications overflow.
+        let (event_sender, event_receiver) = mpsc::sync_channel(4096);
+        let event_overflowed = Arc::new(AtomicBool::new(false));
+        let callback_overflowed = Arc::clone(&event_overflowed);
         let mut watcher: RecommendedWatcher = match notify::recommended_watcher(
-            move |event| { let _ = event_sender.send(event); },
+            move |event| enqueue_watcher_event(&event_sender, &callback_overflowed, event),
         ) {
             Ok(watcher) => watcher,
             Err(error) => {
@@ -344,6 +348,15 @@ fn spawn_filesystem_watcher(
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
 
+            // A full queue means some paths may not have been delivered. A full
+            // refresh is the only safe recovery; never silently lose file changes.
+            if event_overflowed.swap(false, Ordering::AcqRel) {
+                pending_paths.clear();
+                force_full_refresh = true;
+                pending = true;
+                last_event = Instant::now();
+            }
+
             let periodic_refresh_due = last_full_refresh.elapsed() >= Duration::from_secs(600);
             let event_refresh_due = pending && last_event.elapsed() >= Duration::from_millis(750);
             if periodic_refresh_due || event_refresh_due {
@@ -389,6 +402,16 @@ fn spawn_filesystem_watcher(
         }
     });
     root_sender
+}
+
+fn enqueue_watcher_event(
+    sender: &mpsc::SyncSender<notify::Result<notify::Event>>,
+    overflowed: &AtomicBool,
+    event: notify::Result<notify::Event>,
+) {
+    if let Err(mpsc::TrySendError::Full(_)) = sender.try_send(event) {
+        overflowed.store(true, Ordering::Release);
+    }
 }
 
 fn register_watch(
@@ -842,6 +865,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_file(db_path);
     }
+    #[test]
+    fn watcher_event_queue_is_bounded_and_signals_overflow() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let overflowed = AtomicBool::new(false);
+        let first = notify::Event::new(EventKind::Any).add_path(PathBuf::from("/tmp/first.txt"));
+        let second = notify::Event::new(EventKind::Any).add_path(PathBuf::from("/tmp/second.txt"));
+
+        enqueue_watcher_event(&sender, &overflowed, Ok(first));
+        enqueue_watcher_event(&sender, &overflowed, Ok(second));
+
+        assert!(overflowed.load(Ordering::Acquire));
+        let queued = receiver.try_recv().unwrap().unwrap();
+        assert_eq!(queued.paths, vec![PathBuf::from("/tmp/first.txt")]);
+        assert!(receiver.try_recv().is_err());
+    }
+
     #[test]
     fn filesystem_watcher_filters_non_content_events_and_database_sidecars() {
         assert!(event_requires_reindex(&EventKind::Any));
