@@ -54,6 +54,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libgl1-mesa-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-cursor-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
 
+      - name: Validate Windows service scripts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $files = @(
+            "packaging/windows/task-scheduler/install-service.ps1",
+            "packaging/windows/task-scheduler/deep-search-service.ps1",
+            "packaging/windows/task-scheduler/uninstall-service.ps1"
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List | Out-String | Write-Error
+            }
+          }
+
       - name: Run tests
         run: cargo test --all-targets
 
