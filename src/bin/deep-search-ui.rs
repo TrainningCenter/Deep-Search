@@ -1516,7 +1516,7 @@ fn format_size(bytes: u64) -> String {
 
 #[cfg(test)]
 mod rtl_text_tests {
-    use super::display_text;
+    use super::{display_text, UiSettings};
 
     #[test]
     fn arabic_display_text_shapes_letters_and_preserves_latin_runs() {
@@ -1532,6 +1532,14 @@ mod rtl_text_tests {
     fn left_to_right_text_is_unchanged() {
         let text = "Deep-Search report 2026";
         assert_eq!(display_text(text), text);
+    }
+
+    #[test]
+    fn notification_defaults_follow_opt_in_policy() {
+        let settings = UiSettings::default();
+        assert!(settings.notify_on_errors);
+        assert!(!settings.notify_on_completion);
+        assert!(!settings.notify_on_service_state);
     }
 
     #[test]
