@@ -75,20 +75,6 @@ fn spawn_filesystem_watcher(
 ) -> mpsc::Sender<PathBuf> {
     let (root_sender, root_receiver) = mpsc::channel::<PathBuf>();
     thread::spawn(move || {
-        let (event_sender, event_receiver) = mpsc::channel();
-        let mut watcher: RecommendedWatcher = match notify::recommended_watcher(
-            move |event| { let _ = event_sender.send(event); },
-        ) {
-            Ok(watcher) => watcher,
-            Err(error) => {
-                eprintln!("Filesystem watcher could not start: {error}");
-                return;
-            }
-        };
-        let mut watched = HashSet::new();
-        for root in initial_roots {
-            register_watch(&mut watcher, &root, &mut watched);
-        }
         let engine = match SearchEngine::open(&database_path) {
             Ok(engine) => engine,
             Err(error) => {
@@ -96,6 +82,33 @@ fn spawn_filesystem_watcher(
                 return;
             }
         };
+        let (event_sender, event_receiver) = mpsc::channel();
+        let mut watcher: RecommendedWatcher = match notify::recommended_watcher(
+            move |event| { let _ = event_sender.send(event); },
+        ) {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                eprintln!("Filesystem notifications unavailable; using periodic reconciliation: {error}");
+                loop {
+                    thread::sleep(Duration::from_secs(600));
+                    if let Ok(_guard) = index_lock.lock() {
+                        if let Ok(roots) = engine.index_roots() {
+                            let paths = roots.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+                            let report = engine.index_paths(&paths);
+                            eprintln!(
+                                "Periodic reconciliation complete: {} discovered, {} saved, {} removed, {} errors",
+                                report.files_discovered, report.files_saved,
+                                report.files_removed, report.errors
+                            );
+                        }
+                    }
+                }
+            }
+        };
+        let mut watched = HashSet::new();
+        for root in initial_roots {
+            register_watch(&mut watcher, &root, &mut watched);
+        }
 
         let mut pending_paths = HashSet::<PathBuf>::new();
         let mut pending = false;
