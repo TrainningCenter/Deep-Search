@@ -447,6 +447,17 @@ impl DeepSearchApp {
             changed = true;
         }
         if ui.button(if self.arabic { "ملاءمة تلقائية للأعمدة" } else { "Auto-fit columns" }).clicked() {
+            let widths = self.active_profile().columns.iter().map(|column| {
+                let header_width = column_label(&column.key, arabic).chars().count();
+                let content_width = self.results.iter().take(500)
+                    .map(|result| result_column_text(result, &column.key).chars().count())
+                    .max().unwrap_or(0);
+                let width = (header_width.max(content_width) as f32 * 8.0 + 28.0).clamp(60.0, 1000.0);
+                (column.key.clone(), width)
+            }).collect::<BTreeMap<_, _>>();
+            for column in &mut self.active_profile_mut().columns {
+                if let Some(width) = widths.get(&column.key) { column.width = *width; }
+            }
             self.reset_table_layout = true;
             changed = true;
         }
@@ -469,7 +480,6 @@ impl DeepSearchApp {
                 .range(egui::Rangef::new(60.0, 1200.0))
                 .id(egui::Id::new(column.key.clone()))
                 .resizable(true)
-                .auto_size_this_frame(self.reset_table_layout)
         }).collect::<Vec<_>>();
         let table = Table::new()
             .id_salt(self.settings.active_profile.clone())
