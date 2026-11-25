@@ -375,7 +375,8 @@ impl DeepSearchApp {
         let mut drag_started: Option<usize> = None;
         let mut hovered_target: Option<usize> = None;
         let pointer_released = ui.input(|input| input.pointer.any_released());
-        let is_dragging = self.dragged_column.is_some();
+        let mut next_dragged_column = self.dragged_column;
+        let is_dragging = next_dragged_column.is_some();
         let arabic = self.arabic;
         let columns = &mut self.active_profile_mut().columns;
         let column_count = columns.len();
@@ -399,16 +400,16 @@ impl DeepSearchApp {
             });
             if is_dragging && row.response.hovered() { hovered_target = Some(index); }
         }
-        if let Some(index) = drag_started { self.dragged_column = Some(index); }
+        if let Some(index) = drag_started { next_dragged_column = Some(index); }
         if pointer_released {
-            if let (Some(source), Some(target)) = (self.dragged_column.take(), hovered_target) {
+            if let (Some(source), Some(target)) = (next_dragged_column.take(), hovered_target) {
                 if source != target && source < columns.len() {
                     let moved = columns.remove(source);
                     columns.insert(target.min(columns.len()), moved);
                     changed = true;
                 }
             } else {
-                self.dragged_column = None;
+                next_dragged_column = None;
             }
         }
         if let Some((index, direction)) = move_request {
@@ -428,6 +429,7 @@ impl DeepSearchApp {
                 }
             }
         }
+        self.dragged_column = next_dragged_column;
         let row_height = &mut self.active_profile_mut().row_height;
         ui.horizontal(|ui| {
             ui.label(if arabic { "ارتفاع الصف" } else { "Row height" });
