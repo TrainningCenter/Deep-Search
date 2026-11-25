@@ -591,7 +591,9 @@ fn service_helper(action: &str, username: &str, privileged: bool) -> Result<Stri
     }.map_err(|error| format!("Could not run service helper: {error}. Is the Linux systemd service installed?"))?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    if output.status.success() {
+    let expected_inactive = (action == "is-active" && stdout == "inactive")
+        || (action == "is-enabled" && matches!(stdout.as_str(), "disabled" | "static" | "indirect" | "masked"));
+    if output.status.success() || expected_inactive {
         Ok(if stdout.is_empty() { stderr } else { stdout })
     } else {
         Err(if stderr.is_empty() { stdout } else { stderr })
