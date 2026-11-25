@@ -233,6 +233,15 @@ jobs:
           test -s dist/deep-search-macos-arm64.sha256
           test -s dist/deep-search-docker-linux-x64.sha256
 
+      - name: Verify release publishing credential
+        env:
+          RELEASE_TOKEN: ${{ secrets.DEEP_SEARCH_RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::Add the DEEP_SEARCH_RELEASE_TOKEN repository secret. The current GitHub App token cannot create releases (HTTP 403)."
+            exit 1
+          fi
+
       - name: Publish prerelease on GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
@@ -242,6 +251,7 @@ jobs:
           prerelease: true
           make_latest: false
           generate_release_notes: true
+          token: ${{ secrets.DEEP_SEARCH_RELEASE_TOKEN }}
           files: |
             dist/deep-search-linux-x64.tar.gz
             dist/deep-search-linux-x64.sha256
