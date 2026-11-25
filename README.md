@@ -95,7 +95,7 @@ Supported sort fields: `relevance`, `name`, `path`, `extension`, `size`, `modifi
 
 Supported sort orders: `asc` and `desc`.
 
-File categories currently supported by `type:`: `video`, `audio`, `image`, `document`, and `archive`.
+File categories currently supported by `type:`: `video`, `audio`, `image`, `document`, and `archive`. The video category includes common playback formats (including ASF, DIVX, F4V, MPEG-1/2, RealMedia, and the usual MP4/MKV/MOV/AVI/WMV/WebM formats) while intentionally excluding camera-specific recording containers such as 3GP, MTS, M2TS, MXF, MOD, TOD, and DV.
 
 Show the number of indexed files:
 
