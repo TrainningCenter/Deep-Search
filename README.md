@@ -14,6 +14,23 @@ For Linux, extract the downloaded archive, open a terminal in the extracted dire
 sudo bash packaging/linux/install.sh "$USER"
 ```
 
+For Windows, extract the downloaded artifact and then extract the included `deep-search-windows-x64.zip`. Open **PowerShell as Administrator** in the extracted package directory. Run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\packaging\windows\task-scheduler\install-service.ps1 -UserName "$env:USERDOMAIN\$env:USERNAME" -BinaryPath ".\deep-search.exe"
+```
+
+The installer copies both executables into Program Files, creates a Start Menu shortcut, and registers the background service to start at boot. By default, Windows S4U logon cannot access password-protected network shares. To enable authenticated UNC/NAS shares, add `-EnableAuthenticatedNetworkShares`; the installer will ask for the account password.
+
+For macOS Apple Silicon, extract the downloaded artifact and then extract `deep-search-macos-arm64.tar.gz`. In Terminal, from the extracted package directory, run:
+
+```bash
+sudo bash packaging/macos/launchd/install-service.sh "$USER" "./deep-search"
+```
+
+This installs the background LaunchDaemon and, when the desktop binary is present, creates `/Applications/Deep-Search.app`.
+
 These are alpha builds. The workflow runs the automated tests before packaging; hardware-specific desktop behavior and physical Windows/macOS service behavior still require real-machine validation.
 
 # Desktop application (alpha)
