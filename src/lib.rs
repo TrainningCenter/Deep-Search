@@ -1,3 +1,4 @@
+pub mod client;
 pub mod content;
 pub mod database;
 pub mod engine;
