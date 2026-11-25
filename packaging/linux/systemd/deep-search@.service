@@ -1,0 +1,20 @@
+[Unit]
+Description=Deep-Search background engine for user %i
+Documentation=https://github.com/TrainningCenter/Deep-Search
+After=local-fs.target
+Wants=local-fs.target
+
+[Service]
+Type=simple
+User=%i
+UMask=0077
+ExecStartPre=/usr/bin/mkdir -p %h/.local/share/deep-search
+ExecStart=/usr/local/bin/deep-search serve %h/.local/share/deep-search/index.sqlite
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
