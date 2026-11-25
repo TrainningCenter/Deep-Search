@@ -14,5 +14,14 @@ case "$username" in
     ;;
 esac
 
+getent passwd "$username" >/dev/null || {
+  echo "Linux user '$username' does not exist." >&2
+  exit 1
+}
+[[ "$(id -u "$username")" -ne 0 ]] || {
+  echo "Refusing to manage a root-owned Deep-Search instance." >&2
+  exit 1
+}
+
 systemctl disable --now "deep-search@${username}.service"
 echo "Disabled Deep-Search for '$username'. The user's index database was preserved."
