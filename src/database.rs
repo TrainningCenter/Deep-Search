@@ -884,6 +884,29 @@ mod database_tests {
     }
 
     #[test]
+    fn filters_media_by_minimum_and_maximum_duration() {
+        use crate::media::MediaMetadata;
+
+        let db = Database::open(":memory:").unwrap();
+        let short = sample_file("short.mp4", 100);
+        let long = sample_file("long.mp4", 200);
+        let missing = sample_file("unknown.mp4", 300);
+        db.upsert_file(&short).unwrap();
+        db.upsert_file(&long).unwrap();
+        db.upsert_file(&missing).unwrap();
+        db.replace_media_metadata_batch(&[
+            (short.path.clone(), Some(MediaMetadata { duration_ms: Some(30_000), ..Default::default() })),
+            (long.path.clone(), Some(MediaMetadata { duration_ms: Some(180_000), ..Default::default() })),
+        ]).unwrap();
+
+        let at_least = db.search(&SearchExpression::DurationAtLeast(60_000)).unwrap();
+        assert_eq!(at_least.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(), vec!["long.mp4"]);
+
+        let at_most = db.search(&SearchExpression::DurationAtMost(60_000)).unwrap();
+        assert_eq!(at_most.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(), vec!["short.mp4"]);
+    }
+
+    #[test]
     fn detects_modification_timestamp_changes_within_the_same_second() {
         let db = Database::open(":memory:").unwrap();
         let original = sample_file("rapid-edit.txt", 10);
