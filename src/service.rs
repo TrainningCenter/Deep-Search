@@ -673,7 +673,6 @@ mod tests {
         assert!(response["error"].as_str().unwrap().contains("Unknown command"));
 
         drop(engine);
-        let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_file(db_path);
     }
 
@@ -797,7 +796,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("deep-search-service-root-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let root_string = root.to_string_lossy().to_string();
-        engine.index_paths(&[root_string.clone()]);
+        let _ = engine.index_paths(&[root_string.clone()]);
         let refreshed = handle_request(r#"{"command":"status"}"#, &engine);
         assert!(refreshed["data"]["index_roots"].as_array().unwrap().iter()
             .any(|entry| entry["path"] == root_string && entry["enabled"] == true));
@@ -830,6 +829,7 @@ mod tests {
         assert_eq!(refreshed["data"]["stop_on_logout"], true);
 
         drop(engine);
+        let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_file(db_path);
     }
     #[test]
