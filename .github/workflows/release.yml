@@ -156,6 +156,7 @@ jobs:
             deep-search-${{ matrix.platform }}.sha256
           generate_release_notes: true
           prerelease: true
+          token: ${{ secrets.DEEP_SEARCH_RELEASE_TOKEN }}
 
   build-docker:
     name: Build Docker Linux x64
@@ -200,6 +201,7 @@ jobs:
             dist/deep-search-docker-linux-x64.sha256
           generate_release_notes: true
           prerelease: true
+          token: ${{ secrets.DEEP_SEARCH_RELEASE_TOKEN }}
 
   publish-alpha-release:
     name: Publish GitHub Alpha Release
