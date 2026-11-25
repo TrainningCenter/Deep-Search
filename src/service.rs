@@ -227,7 +227,7 @@ mod tests {
         assert_eq!(indexed.files_saved, 1005);
 
         let first_batch = handle_request(
-            r#"{\"command\":\"search\",\"query\":\"name:report\",\"limit\":1000,\"offset\":0}"#,
+            r#"{"command":"search","query":"name:report","limit":1000,"offset":0}"#,
             &engine,
         );
         assert_eq!(first_batch["ok"], true);
@@ -236,7 +236,7 @@ mod tests {
         assert_eq!(first_batch["data"]["has_more"], true);
 
         let second_batch = handle_request(
-            r#"{\"command\":\"search\",\"query\":\"name:report\",\"limit\":1000,\"offset\":1000}"#,
+            r#"{"command":"search","query":"name:report","limit":1000,"offset":1000}"#,
             &engine,
         );
         assert_eq!(second_batch["ok"], true);
