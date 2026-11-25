@@ -33,6 +33,29 @@ This installs the background LaunchDaemon and, when the desktop binary is presen
 
 These are alpha builds. The workflow runs the automated tests before packaging; hardware-specific desktop behavior and physical Windows/macOS service behavior still require real-machine validation.
 
+## Docker service (headless)
+
+The Docker image runs the indexing/search engine without a desktop window. Keep the desktop UI on the host; it connects to the container through the loopback service port.
+
+1. Download the repository source ZIP from GitHub and extract it.
+2. Create a `scan` folder beside `Dockerfile` and `compose.yaml`, or edit the bind mount in `compose.yaml` to point directly to a mounted NAS/network share.
+3. From that directory, start the service:
+
+```bash
+docker compose up -d --build
+```
+
+The Compose file binds the service to `127.0.0.1:4765` only, stores the index in a persistent Docker volume, and mounts `./scan` read-only at `/scan`. In the desktop application's indexing-path field, enter `/scan`. For a NAS mount, replace `./scan:/scan:ro` with the host mount, for example `/mnt/nas:/scan:ro`.
+
+Useful commands:
+
+```bash
+docker compose logs -f
+docker compose down
+```
+
+The service has no authentication/TLS layer yet, so the sample deliberately does not expose port 4765 to other machines. Remote service access must wait for the secured transport implementation.
+
 # Desktop application (alpha)
 
 The first cross-platform desktop window is available behind the `desktop` feature. It connects to the background service at `127.0.0.1:4765`, lets you submit one or more indexing paths, and displays search matches in a resizable table. Search results stream into the table as transport batches arrive; the 1000-record service limit is not a cap on the total number of displayed matches.
