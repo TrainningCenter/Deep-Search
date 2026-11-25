@@ -56,6 +56,8 @@ pub enum SearchExpression {
     FileType(String),
     SizeAtLeast(u64),
     SizeAtMost(u64),
+    DurationAtLeast(u64),
+    DurationAtMost(u64),
     And(Vec<SearchExpression>),
     Or(Vec<SearchExpression>),
     Not(Box<SearchExpression>),
@@ -164,6 +166,14 @@ fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) ->
         SearchExpression::SizeAtMost(size) => {
             values.push(Value::Integer((*size).min(i64::MAX as u64) as i64));
             format!("size_bytes <= ?{}", values.len())
+        }
+        SearchExpression::DurationAtLeast(duration) => {
+            values.push(Value::Integer((*duration).min(i64::MAX as u64) as i64));
+            format!("EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.file_path = files.path AND CAST(json_extract(mm.metadata_json, '$.duration_ms') AS INTEGER) >= ?{})", values.len())
+        }
+        SearchExpression::DurationAtMost(duration) => {
+            values.push(Value::Integer((*duration).min(i64::MAX as u64) as i64));
+            format!("EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.file_path = files.path AND CAST(json_extract(mm.metadata_json, '$.duration_ms') AS INTEGER) <= ?{})", values.len())
         }
         SearchExpression::And(expressions) => {
             if expressions.is_empty() { return "1 = 1".to_string(); }
