@@ -5,8 +5,12 @@ use serde_json::{json, Value};
 use std::error::Error;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
-use std::time::Duration;
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 const MAX_REQUEST_BYTES: usize = 1_048_576;
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -15,13 +19,22 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
 /// remote/NAS access requires a separately secured transport layer.
 pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
     let engine = SearchEngine::open(database_path)?;
+    let initial_roots = engine.index_roots()?;
+    let index_lock = Arc::new(Mutex::new(()));
+    let watch_roots = spawn_filesystem_watcher(
+        database_path.to_path_buf(),
+        initial_roots,
+        Arc::clone(&index_lock),
+    );
     let listener = TcpListener::bind(address)?;
     eprintln!("Deep-Search service listening on {address}");
 
     for incoming in listener.incoming() {
         match incoming {
             Ok(stream) => {
-                if let Err(error) = handle_connection(stream, &engine) {
+                if let Err(error) = handle_connection(
+                    stream, &engine, &watch_roots, &index_lock,
+                ) {
                     eprintln!("Service request failed: {error}");
                 }
             }
@@ -31,7 +44,12 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn handle_connection(mut stream: TcpStream, engine: &SearchEngine) -> Result<(), Box<dyn Error>> {
+fn handle_connection(
+    mut stream: TcpStream,
+    engine: &SearchEngine,
+    watch_roots: &mpsc::Sender<PathBuf>,
+    index_lock: &Arc<Mutex<()>>,
+) -> Result<(), Box<dyn Error>> {
     stream.set_read_timeout(Some(CONNECTION_TIMEOUT))?;
     stream.set_write_timeout(Some(CONNECTION_TIMEOUT))?;
     let mut request = String::new();
@@ -40,7 +58,7 @@ fn handle_connection(mut stream: TcpStream, engine: &SearchEngine) -> Result<(),
     let response = if !is_valid_request_line(&request) {
         json!({"ok": false, "error": "Request must be newline-terminated and no larger than 1 MiB"})
     } else {
-        handle_request(&request, engine)
+        handle_request_with_context(&request, engine, Some(watch_roots), Some(index_lock))
     };
     serde_json::to_writer(&mut stream, &response)?;
     stream.write_all(b"\n")?;
@@ -48,11 +66,146 @@ fn handle_connection(mut stream: TcpStream, engine: &SearchEngine) -> Result<(),
     Ok(())
 }
 
+fn spawn_filesystem_watcher(
+    database_path: PathBuf,
+    initial_roots: Vec<PathBuf>,
+    index_lock: Arc<Mutex<()>>,
+) -> mpsc::Sender<PathBuf> {
+    let (root_sender, root_receiver) = mpsc::channel::<PathBuf>();
+    thread::spawn(move || {
+        let (event_sender, event_receiver) = mpsc::channel();
+        let mut watcher: RecommendedWatcher = match notify::recommended_watcher(
+            move |event| { let _ = event_sender.send(event); },
+        ) {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                eprintln!("Filesystem watcher could not start: {error}");
+                return;
+            }
+        };
+        let mut watched = HashSet::new();
+        for root in initial_roots {
+            register_watch(&mut watcher, &root, &mut watched);
+        }
+        let engine = match SearchEngine::open(&database_path) {
+            Ok(engine) => engine,
+            Err(error) => {
+                eprintln!("Filesystem watcher could not open the index: {error}");
+                return;
+            }
+        };
+
+        let mut pending = false;
+        let mut last_event = Instant::now();
+        loop {
+            while let Ok(root) = root_receiver.try_recv() {
+                register_watch(&mut watcher, &root, &mut watched);
+            }
+
+            match event_receiver.recv_timeout(Duration::from_millis(250)) {
+                Ok(Ok(event)) => {
+                    if event_requires_reindex(&event.kind)
+                        && !event_is_database_internal(&event, &database_path)
+                    {
+                        pending = true;
+                        last_event = Instant::now();
+                    }
+                }
+                Ok(Err(error)) => eprintln!("Filesystem watcher event error: {error}"),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+
+            if pending && last_event.elapsed() >= Duration::from_millis(750) {
+                match index_lock.lock() {
+                    Ok(_guard) => {
+                        match engine.index_roots() {
+                            Ok(roots) if !roots.is_empty() => {
+                                let paths = roots.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+                                let report = engine.index_paths(&paths);
+                                eprintln!(
+                                    "Automatic refresh complete: {} discovered, {} saved, {} removed, {} errors",
+                                    report.files_discovered, report.files_saved,
+                                    report.files_removed, report.errors
+                                );
+                                for root in roots {
+                                    register_watch(&mut watcher, &root, &mut watched);
+                                }
+                            }
+                            Ok(_) => {}
+                            Err(error) => eprintln!("Could not read configured index roots: {error}"),
+                        }
+                    }
+                    Err(_) => eprintln!("Automatic refresh skipped because the indexing lock was poisoned"),
+                }
+                pending = false;
+            }
+        }
+    });
+    root_sender
+}
+
+fn register_watch(
+    watcher: &mut RecommendedWatcher,
+    root: &Path,
+    watched: &mut HashSet<PathBuf>,
+) {
+    let target = if root.exists() {
+        root.to_path_buf()
+    } else if let Some(parent) = root.parent().filter(|parent| parent.exists()) {
+        parent.to_path_buf()
+    } else {
+        return;
+    };
+    if !watched.insert(target.clone()) {
+        return;
+    }
+    let mode = if target.is_dir() {
+        RecursiveMode::Recursive
+    } else {
+        RecursiveMode::NonRecursive
+    };
+    if let Err(error) = watcher.watch(&target, mode) {
+        watched.remove(&target);
+        eprintln!("Could not watch {}: {error}", target.display());
+    }
+}
+
+fn event_requires_reindex(kind: &EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) | EventKind::Any
+    )
+}
+
+fn event_is_database_internal(event: &notify::Event, database_path: &Path) -> bool {
+    if event.paths.is_empty() {
+        return false;
+    }
+    let database = database_path.to_string_lossy().into_owned();
+    event.paths.iter().all(|path| {
+        let value = path.to_string_lossy();
+        value == database
+            || value == format!("{database}-wal")
+            || value == format!("{database}-shm")
+            || value == format!("{database}-journal")
+    })
+}
+
 fn is_valid_request_line(request: &str) -> bool {
     request.len() <= MAX_REQUEST_BYTES && request.ends_with('\n')
 }
 
 fn handle_request(input: &str, engine: &SearchEngine) -> Value {
+    handle_request_with_context(input, engine, None, None)
+}
+
+fn handle_request_with_context(
+    input: &str,
+    engine: &SearchEngine,
+    watch_roots: Option<&mpsc::Sender<PathBuf>>,
+    index_lock: Option<&Arc<Mutex<()>>>,
+) -> Value {
     let result = (|| -> Result<Value, Box<dyn Error>> {
         let request: Value = serde_json::from_str(input)?;
         let command = request.get("command").and_then(Value::as_str)
@@ -73,7 +226,17 @@ fn handle_request(input: &str, engine: &SearchEngine) -> Value {
                 if paths.is_empty() {
                     return Err("At least one path is required".into());
                 }
-                let report = engine.index_paths(&paths);
+                let report = if let Some(lock) = index_lock {
+                    let _guard = lock.lock().map_err(|_| "Indexing lock is unavailable")?;
+                    engine.index_paths(&paths)
+                } else {
+                    engine.index_paths(&paths)
+                };
+                if let Some(sender) = watch_roots {
+                    for path in &paths {
+                        let _ = sender.send(PathBuf::from(path));
+                    }
+                }
                 Ok(json!({
                     "files_discovered": report.files_discovered,
                     "directories_scanned": report.directories_scanned,
