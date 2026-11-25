@@ -21,6 +21,7 @@ const IMAGE_EXTENSIONS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
 pub struct MediaMetadata {
     pub duration_ms: Option<u64>,
     pub width: Option<u32>,
@@ -248,6 +249,44 @@ fn parse_frame_rate(value: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn extracts_dimensions_and_format_from_png_without_decoding_pixels() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("deep-search-image-{unique}.png"));
+        let image = image::RgbaImage::from_pixel(7, 5, image::Rgba([1, 2, 3, 255]));
+        image.save(&path).unwrap();
+
+        let metadata = extract_image_metadata(&path, Some("png")).unwrap();
+        assert_eq!(metadata.width, Some(7));
+        assert_eq!(metadata.height, Some(5));
+        assert_eq!(metadata.image_format.as_deref(), Some("png"));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn extracts_svg_dimensions_from_viewbox() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("deep-search-image-{unique}.svg"));
+        std::fs::write(&path, r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480"></svg>"#).unwrap();
+
+        let metadata = extract_image_metadata(&path, Some("svg")).unwrap();
+        assert_eq!(metadata.width, Some(640));
+        assert_eq!(metadata.height, Some(480));
+        assert_eq!(metadata.image_format.as_deref(), Some("svg"));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn legacy_media_metadata_without_image_fields_still_deserializes() {
+        let legacy = r#"{"duration_ms":1200,"width":1920,"height":1080,"video_codec":"h264"}"#;
+        let metadata: MediaMetadata = serde_json::from_str(legacy).unwrap();
+        assert_eq!(metadata.duration_ms, Some(1200));
+        assert_eq!(metadata.video_codec.as_deref(), Some("h264"));
+        assert_eq!(metadata.camera_model, None);
+    }
     use super::*;
 
     #[test]
