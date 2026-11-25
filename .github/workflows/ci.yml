@@ -34,7 +34,7 @@ jobs:
           sudo apt-get install -y libasound2-dev libgl1-mesa-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-cursor-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
 
       - name: Validate Linux service scripts
-        run: bash -n packaging/linux/systemd/install-service.sh packaging/linux/systemd/uninstall-service.sh packaging/linux/systemd/deep-search-service.sh packaging/linux/systemd/test-service-control.sh packaging/macos/launchd/install-service.sh packaging/macos/launchd/uninstall-service.sh packaging/macos/launchd/deep-search-service.sh
+        run: bash -n packaging/linux/install.sh packaging/linux/systemd/install-service.sh packaging/linux/systemd/uninstall-service.sh packaging/linux/systemd/deep-search-service.sh packaging/linux/systemd/test-service-control.sh packaging/macos/launchd/install-service.sh packaging/macos/launchd/uninstall-service.sh packaging/macos/launchd/deep-search-service.sh
 
       - name: Test Linux service control helper
         run: bash packaging/linux/systemd/test-service-control.sh
