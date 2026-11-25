@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{Cursor, Read};
 use std::path::Path;
 
 const MAX_PLAIN_TEXT_SIZE: u64 = 1024 * 1024;
@@ -405,6 +405,189 @@ fn extract_spreadsheet_text(path: &Path) -> Option<String> {
     })
 }
 
+#[derive(Default)]
+struct ArchiveBudget {
+    entries: usize,
+    uncompressed_bytes: u64,
+}
+
+impl ArchiveBudget {
+    fn consume(&mut self, size: u64) -> Option<()> {
+        self.entries = self.entries.checked_add(1)?;
+        self.uncompressed_bytes = self.uncompressed_bytes.checked_add(size)?;
+        if self.entries > MAX_ARCHIVE_ENTRIES || self.uncompressed_bytes > MAX_ARCHIVE_UNCOMPRESSED_SIZE {
+            return None;
+        }
+        Some(())
+    }
+}
+
+fn append_archive_text(output: &mut String, value: &str) {
+    if output.len() >= MAX_EXTRACTED_TEXT_SIZE {
+        return;
+    }
+    let remaining = MAX_EXTRACTED_TEXT_SIZE - output.len();
+    let mut end = value.len().min(remaining);
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    output.push_str(&value[..end]);
+}
+
+fn is_plain_text_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "txt" | "md" | "markdown" | "log" | "csv" | "tsv" |
+        "json" | "jsonl" | "xml" | "html" | "htm" | "css" |
+        "js" | "jsx" | "ts" | "tsx" | "rs" | "toml" |
+        "yaml" | "yml" | "ini" | "conf" | "cfg" | "sql" |
+        "py" | "sh" | "bash" | "c" | "h" | "cpp" | "hpp" |
+        "java" | "go" | "php" | "rb" | "swift" | "kt" |
+        "env" | "rst" | "tex" | "svg" | "xhtml"
+    )
+}
+
+fn extract_office_archive_bytes(
+    bytes: &[u8],
+    extension: &str,
+    budget: &mut ArchiveBudget,
+) -> Option<String> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
+    let mut output = String::new();
+
+    for index in 0..archive.len() {
+        let mut entry = match archive.by_index(index) {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        if entry.is_dir() {
+            continue;
+        }
+        let size = entry.size();
+        budget.consume(size)?;
+        let name = entry.name().to_owned();
+        let matches = match extension {
+            "docx" => name == "word/document.xml",
+            "odt" => name == "content.xml",
+            "pptx" => name.starts_with("ppt/slides/slide") && name.ends_with(".xml"),
+            "xlsx" => name == "xl/sharedStrings.xml"
+                || (name.starts_with("xl/worksheets/sheet") && name.ends_with(".xml")),
+            _ => false,
+        };
+        if !matches || size > MAX_XML_SIZE {
+            continue;
+        }
+
+        let mut xml = String::with_capacity(size as usize);
+        if entry.by_ref().take(MAX_XML_SIZE + 1).read_to_string(&mut xml).is_err()
+            || xml.len() as u64 > MAX_XML_SIZE
+        {
+            continue;
+        }
+        if let Some(text) = extract_xml_text(&xml) {
+            if !output.is_empty() {
+                output.push(' ');
+            }
+            append_archive_text(&mut output, &text);
+        }
+        if output.len() >= MAX_EXTRACTED_TEXT_SIZE {
+            break;
+        }
+    }
+
+    limit_text(output)
+}
+
+/// Searchable extraction from ZIP-family containers. Nested archives are handled
+/// iteratively, so there is no nesting-depth limit; total entries, expanded bytes,
+/// and returned text remain bounded to protect the indexer from archive bombs.
+fn extract_zip_archive_text(path: &Path) -> Option<String> {
+    let file = File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.take(MAX_ARCHIVE_SIZE + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() as u64 > MAX_ARCHIVE_SIZE {
+        return None;
+    }
+
+    let mut pending = vec![(bytes, String::new())];
+    let mut budget = ArchiveBudget::default();
+    let mut output = String::new();
+
+    while let Some((archive_bytes, archive_name)) = pending.pop() {
+        if !archive_name.is_empty() {
+            append_archive_text(&mut output, &archive_name);
+            append_archive_text(&mut output, " ");
+        }
+
+        let mut archive = zip::ZipArchive::new(Cursor::new(archive_bytes)).ok()?;
+        for index in 0..archive.len() {
+            let mut entry = match archive.by_index(index) {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+            if entry.is_dir() {
+                continue;
+            }
+
+            let size = entry.size();
+            budget.consume(size)?;
+            let name = entry.name().to_owned();
+            let extension = Path::new(&name)
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+
+            let mut data = Vec::with_capacity(size.min(MAX_ARCHIVE_UNCOMPRESSED_SIZE) as usize);
+            if entry.by_ref().take(size.saturating_add(1)).read_to_end(&mut data).is_err()
+                || data.len() as u64 > size
+            {
+                continue;
+            }
+
+            if matches!(extension.as_str(), "zip" | "jar" | "epub" | "cbz" | "apk") {
+                pending.push((data, name));
+                continue;
+            }
+
+            let extracted = match extension.as_str() {
+                "docx" | "odt" | "pptx" | "xlsx" => {
+                    extract_office_archive_bytes(&data, &extension, &mut budget)
+                }
+                "pdf" => pdf_extract::extract_text_from_mem(&data).ok().and_then(limit_text),
+                "rtf" => String::from_utf8(data).ok().and_then(|text| extract_rtf_text(&text)),
+                "xml" | "svg" | "xhtml" => String::from_utf8(data)
+                    .ok()
+                    .and_then(|text| extract_xml_text(&text)),
+                "html" | "htm" => String::from_utf8(data).ok().and_then(limit_text),
+                value if is_plain_text_extension(value) => {
+                    String::from_utf8(data).ok().filter(|text| !text.contains('\0')).and_then(limit_text)
+                }
+                _ => None,
+            };
+
+            if let Some(text) = extracted {
+                if !output.is_empty() {
+                    append_archive_text(&mut output, " ");
+                }
+                append_archive_text(&mut output, &name);
+                append_archive_text(&mut output, " ");
+                append_archive_text(&mut output, &text);
+            }
+
+            if output.len() >= MAX_EXTRACTED_TEXT_SIZE {
+                break;
+            }
+        }
+
+        if output.len() >= MAX_EXTRACTED_TEXT_SIZE {
+            break;
+        }
+    }
+
+    limit_text(output)
+}
+
 /// Extract searchable text from supported document formats.
 /// Plain text is limited to 1 MiB; PDF and office archives have stricter
 /// input, archive-entry, decompressed-size, and output limits.
@@ -434,6 +617,12 @@ pub fn extract_text(path: &Path, size_bytes: u64) -> Option<String> {
                 return None;
             }
             Some(content)
+        }
+        "zip" | "jar" | "epub" | "cbz" | "apk" => {
+            if size_bytes > MAX_ARCHIVE_SIZE {
+                return None;
+            }
+            extract_zip_archive_text(path)
         }
         "pdf" => {
             if size_bytes > MAX_PDF_SIZE {
@@ -535,6 +724,48 @@ mod tests {
             assert!(text.contains("Indexed office document"));
             fs::remove_file(path).unwrap();
         }
+    }
+
+    #[test]
+    fn searches_nested_zip_archives_without_a_nesting_depth_limit() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        fn make_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+            let cursor = Cursor::new(Vec::new());
+            let mut writer = zip::ZipWriter::new(cursor);
+            for (name, bytes) in entries {
+                writer.start_file(*name, SimpleFileOptions::default()).unwrap();
+                writer.write_all(bytes).unwrap();
+            }
+            writer.finish().unwrap().into_inner()
+        }
+
+        let mut nested = make_zip(&[("deep.txt", b"needle from deeply nested archive")]);
+        for level in 0..12 {
+            let name = format!("level-{level}.zip");
+            nested = make_zip(&[(name.as_str(), nested.as_slice())]);
+        }
+        let outer = make_zip(&[
+            ("top-level.txt", b"outer archive searchable text"),
+            ("nested-level-12.zip", nested.as_slice()),
+        ]);
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "deep-search-nested-archive-{}-{unique}.zip",
+            std::process::id()
+        ));
+        fs::write(&path, &outer).unwrap();
+
+        let text = extract_text(&path, outer.len() as u64).unwrap();
+        assert!(text.contains("outer archive searchable text"));
+        assert!(text.contains("needle from deeply nested archive"));
+        assert!(text.contains("deep.txt"));
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
