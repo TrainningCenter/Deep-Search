@@ -58,6 +58,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libgl1-mesa-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-cursor-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
 
+      - name: Validate and test macOS service scripts
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bash -n packaging/macos/launchd/install-service.sh packaging/macos/launchd/uninstall-service.sh packaging/macos/launchd/deep-search-service.sh packaging/macos/launchd/test-service-control.sh
+          bash packaging/macos/launchd/test-service-control.sh
+
       - name: Validate Windows service scripts
         if: runner.os == 'Windows'
         shell: pwsh
