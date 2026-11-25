@@ -192,6 +192,13 @@ impl UiSettings {
                 }
             }
         }
+        if !settings.profiles.contains_key("Images") {
+            settings.profiles.insert("Images".into(), default_profile(&[
+                "name", "extension", "resolution", "image_format", "camera_make",
+                "camera_model", "captured_at", "orientation", "size", "path",
+            ]));
+            migrated = true;
+        }
         if migrated { settings.save(); }
         if settings.search_profiles.is_empty() {
             settings.search_profiles.insert("Default".into(), default_search_profile());
