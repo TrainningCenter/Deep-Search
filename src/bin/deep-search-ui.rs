@@ -41,7 +41,7 @@ fn default_frozen_columns() -> usize { 1 }
 
 fn default_enabled() -> bool { true }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct UiSettings {
     profiles: BTreeMap<String, ViewProfile>,
     active_profile: String,
@@ -49,6 +49,17 @@ struct UiSettings {
     tray_enabled: bool,
     #[serde(default = "default_enabled")]
     close_to_tray: bool,
+}
+
+impl Default for UiSettings {
+    fn default() -> Self {
+        Self {
+            profiles: BTreeMap::new(),
+            active_profile: String::new(),
+            tray_enabled: true,
+            close_to_tray: true,
+        }
+    }
 }
 
 fn default_columns() -> Vec<ColumnSetting> {
@@ -995,18 +1006,19 @@ impl eframe::App for DeepSearchApp {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         ui.heading(if self.arabic { "إعدادات التطبيق" } else { "Application settings" });
                         let tray_before = self.settings.tray_enabled;
-                        ui.checkbox(&mut self.settings.tray_enabled, if self.arabic { "إظهار أيقونة شريط النظام" } else { "Show system tray icon" });
-                        ui.checkbox(&mut self.settings.close_to_tray, if self.arabic { "إخفاء النافذة عند الإغلاق" } else { "Close window to tray" });
-                        if tray_before != self.settings.tray_enabled {
+                        let tray_changed = ui.checkbox(&mut self.settings.tray_enabled, if self.arabic { "إظهار أيقونة شريط النظام" } else { "Show system tray icon" }).changed();
+                        let close_changed = ui.checkbox(&mut self.settings.close_to_tray, if self.arabic { "إخفاء النافذة عند الإغلاق" } else { "Close window to tray" }).changed();
+                        if tray_changed && tray_before != self.settings.tray_enabled {
                             if self.settings.tray_enabled {
                                 self.tray_checked = false;
                             } else {
                                 self.tray_icon = None;
                                 self.tray_checked = true;
                             }
+                        }
+                        if tray_changed || close_changed {
                             self.persist_settings();
                         }
-                        self.persist_settings();
                         ui.separator();
                         self.render_column_controls(ui);
                     });
