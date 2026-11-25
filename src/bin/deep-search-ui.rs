@@ -386,7 +386,7 @@ impl DeepSearchApp {
                 let column = &mut columns[index];
                 let label = column_label(&column.key, arabic);
                 changed |= ui.checkbox(&mut column.visible, label).changed();
-                ui.add(egui::DragValue::new(&mut column.width).range(60.0..=1200.0).speed(5.0).suffix(" px"));
+                // Column widths are resized directly from the table header.
                 if ui.small_button("↑").clicked() && index > 0 {
                     move_request = Some((index, -1));
                 }
@@ -435,18 +435,19 @@ impl DeepSearchApp {
             ui.label(if arabic { "ارتفاع الصف" } else { "Row height" });
             changed |= ui.add(egui::Slider::new(row_height, 18.0..=60.0).suffix(" px")).changed();
         });
+        let visible_count = self.active_profile().columns.iter().filter(|column| column.visible).count();
+        let max_frozen = visible_count.min(4);
+        let frozen_columns = &mut self.active_profile_mut().frozen_columns;
+        ui.horizontal(|ui| {
+            ui.label(if arabic { "تثبيت الأعمدة الأولى" } else { "Freeze leading columns" });
+            changed |= ui.add(egui::Slider::new(frozen_columns, 0..=max_frozen)).changed();
+        });
+        if *frozen_columns > max_frozen {
+            *frozen_columns = max_frozen;
+            changed = true;
+        }
         if ui.button(if self.arabic { "ملاءمة تلقائية للأعمدة" } else { "Auto-fit columns" }).clicked() {
-            let widths = self.active_profile().columns.iter().map(|column| {
-                let header_width = column_label(&column.key, arabic).chars().count();
-                let content_width = self.results.iter().take(500)
-                    .map(|result| result_column_text(result, &column.key).chars().count())
-                    .max().unwrap_or(0);
-                let width = (header_width.max(content_width) as f32 * 8.0 + 28.0).clamp(60.0, 1000.0);
-                (column.key.clone(), width)
-            }).collect::<BTreeMap<_, _>>();
-            for column in &mut self.active_profile_mut().columns {
-                if let Some(width) = widths.get(&column.key) { column.width = *width; }
-            }
+            self.reset_table_layout = true;
             changed = true;
         }
         if changed { self.persist_settings(); }
