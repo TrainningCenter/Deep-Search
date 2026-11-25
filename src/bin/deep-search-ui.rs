@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use tray_icon::{menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem}, Icon as TrayIconImage, TrayIcon, TrayIconBuilder};
+use tray_icon::{menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem}, Icon as TrayIconImage, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 enum UiMessage {
     Status(Value),
@@ -256,6 +256,21 @@ impl DeepSearchApp {
     }
 
     fn process_tray_events(&mut self, ctx: &egui::Context) {
+        while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+            if matches!(event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } | TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                }
+            ) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+        }
         while let Ok(event) = MenuEvent::receiver().try_recv() {
             match event.id.0.as_str() {
                 "open" => {
@@ -1024,8 +1039,13 @@ impl eframe::App for DeepSearchApp {
             );
         });
 
+        if self.tray_icon.is_some() {
+            // Keep the event loop alive while the main window is hidden so
+            // tray menu actions can still restore or control the application.
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaintWhileHidden);
+        }
         if self.busy || self.tray_icon.is_some() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }
     }
 }
