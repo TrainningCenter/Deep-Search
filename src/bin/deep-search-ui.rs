@@ -441,7 +441,7 @@ impl DeepSearchApp {
         let columns = &mut self.active_profile_mut().columns;
         let column_count = columns.len();
         for index in 0..column_count {
-            let row = ui.horizontal(|ui| {
+            let row = ui.with_layout(horizontal_layout(arabic), |ui| {
                 let handle = ui.add(egui::Label::new("⠿").sense(egui::Sense::drag()));
                 if handle.drag_started() { drag_started = Some(index); }
                 let column = &mut columns[index];
@@ -492,14 +492,14 @@ impl DeepSearchApp {
         }
         self.dragged_column = next_dragged_column;
         let row_height = &mut self.active_profile_mut().row_height;
-        ui.horizontal(|ui| {
+        ui.with_layout(horizontal_layout(arabic), |ui| {
             ui.label(if arabic { "ارتفاع الصف" } else { "Row height" });
             changed |= ui.add(egui::Slider::new(row_height, 18.0..=60.0).suffix(" px")).changed();
         });
         let visible_count = self.active_profile().columns.iter().filter(|column| column.visible).count();
         let max_frozen = visible_count.min(4);
         let frozen_columns = &mut self.active_profile_mut().frozen_columns;
-        ui.horizontal(|ui| {
+        ui.with_layout(horizontal_layout(arabic), |ui| {
             ui.label(if arabic { "تثبيت الأعمدة الأولى" } else { "Freeze leading columns" });
             changed |= ui.add(egui::Slider::new(frozen_columns, 0..=max_frozen)).changed();
         });
@@ -682,7 +682,7 @@ impl eframe::App for DeepSearchApp {
             }
         }
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
-            ui.horizontal(|ui| {
+            ui.with_layout(horizontal_layout(self.arabic), |ui| {
                 ui.heading("Deep-Search");
                 ui.separator();
                 ui.label("Desktop Alpha");
@@ -716,6 +716,10 @@ impl eframe::App for DeepSearchApp {
             egui::SidePanel::left("sources")
         };
         source_panel.resizable(true).default_width(290.0).show(ctx, |ui| {
+            ui.with_layout(
+                if self.arabic { egui::Layout::top_down(egui::Align::Max) }
+                else { egui::Layout::top_down(egui::Align::Min) },
+                |ui| {
             ui.heading(if self.arabic { "الخدمة" } else { "Service" });
             ui.label(if self.arabic { "عنوان الخدمة" } else { "Address" });
             ui.text_edit_singleline(&mut self.service_address);
@@ -772,7 +776,7 @@ impl eframe::App for DeepSearchApp {
                         "Connect to the service to configure logout behavior"
                     });
                 }
-                ui.horizontal(|ui| {
+                ui.with_layout(horizontal_layout(self.arabic), |ui| {
                     if ui.add_enabled(!self.service_busy, egui::Button::new(if self.arabic { "تشغيل" } else { "Start" })).clicked() {
                         self.control_system_service("start");
                     }
@@ -803,6 +807,8 @@ impl eframe::App for DeepSearchApp {
             ui.separator();
             if self.busy { ui.spinner(); }
             ui.label(&self.message);
+                },
+            );
         });
 
         let view_panel = if self.arabic {
@@ -811,10 +817,18 @@ impl eframe::App for DeepSearchApp {
             egui::SidePanel::right("view_settings")
         };
         view_panel.resizable(true).default_width(270.0).show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| self.render_column_controls(ui));
+            ui.with_layout(
+                if self.arabic { egui::Layout::top_down(egui::Align::Max) }
+                else { egui::Layout::top_down(egui::Align::Min) },
+                |ui| egui::ScrollArea::vertical().show(ui, |ui| self.render_column_controls(ui)),
+            );
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            ui.with_layout(
+                if self.arabic { egui::Layout::top_down(egui::Align::Max) }
+                else { egui::Layout::top_down(egui::Align::Min) },
+                |ui| {
             ui.heading(if self.arabic { "نتائج البحث" } else { "Search results" });
             ui.label(if self.arabic {
                 "جدول واحد مستمر · يتم جلب جميع النتائج تلقائيًا · يمكن تغيير عرض الأعمدة"
@@ -823,6 +837,8 @@ impl eframe::App for DeepSearchApp {
             });
             ui.separator();
             egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| self.render_results(ui));
+                },
+            );
         });
 
         if self.busy { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
@@ -1034,6 +1050,14 @@ fn open_path_in_default_app(path: String) {
             eprintln!("Could not open {}: {error}", path);
         }
     });
+}
+
+fn horizontal_layout(arabic: bool) -> egui::Layout {
+    if arabic {
+        egui::Layout::right_to_left(egui::Align::Center)
+    } else {
+        egui::Layout::left_to_right(egui::Align::Center)
+    }
 }
 
 fn column_label(key: &str, arabic: bool) -> &'static str {
