@@ -126,7 +126,7 @@ fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) ->
         }
         SearchExpression::FileType(file_type) => {
             let extensions: &[&str] = match file_type.trim().to_ascii_lowercase().as_str() {
-                "video" => &["3gp", "avi", "flv", "m2ts", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "mts", "ogv", "ts", "vob", "webm", "wmv"],
+                "video" => &["asf", "avi", "divx", "f4v", "flv", "m1v", "m2v", "m4v", "mkv", "mov", "mp4", "mpe", "mpeg", "mpg", "ogm", "ogv", "rm", "rmvb", "ts", "vob", "webm", "wmv", "xvid"],
                 "audio" => &["aac", "aif", "aiff", "alac", "flac", "m4a", "mp3", "ogg", "opus", "wav", "wma"],
                 "image" => &["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp"],
                 "document" => &["csv", "doc", "docx", "md", "odt", "pdf", "ppt", "pptx", "rtf", "txt", "xls", "xlsx"],
@@ -1070,6 +1070,30 @@ mod database_tests {
         assert_eq!(db.search(&SearchExpression::FileType("document".into())).unwrap().len(), 1);
         assert_eq!(db.search(&SearchExpression::FileType("archive".into())).unwrap().len(), 1);
         assert!(db.search(&SearchExpression::FileType("unknown".into())).unwrap().is_empty());
+    }
+
+    #[test]
+    fn video_category_includes_common_formats_but_excludes_camera_recording_formats() {
+        let db = Database::open(":memory:").unwrap();
+        for name in [
+            "film.asf", "film.divx", "film.f4v", "film.m2v", "film.rmvb",
+            "camera.3gp", "camera.m2ts", "camera.mts", "camera.mxf",
+            "camera.mod", "camera.tod", "camera.dv",
+        ] {
+            db.upsert_file(&sample_file(name, 10)).unwrap();
+        }
+
+        let results = db.search(&SearchExpression::FileType("video".into())).unwrap();
+        let extensions = results.iter()
+            .filter_map(|file| file.extension.as_deref())
+            .collect::<std::collections::HashSet<_>>();
+
+        for extension in ["asf", "divx", "f4v", "m2v", "rmvb"] {
+            assert!(extensions.contains(extension), "missing video extension: {extension}");
+        }
+        for extension in ["3gp", "m2ts", "mts", "mxf", "mod", "tod", "dv"] {
+            assert!(!extensions.contains(extension), "camera format was included: {extension}");
+        }
     }
 
     #[test]
