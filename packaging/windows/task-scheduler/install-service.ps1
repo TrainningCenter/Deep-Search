@@ -28,6 +28,24 @@ $databasePath = Join-Path $dataDirectory "index.sqlite"
 New-Item -ItemType Directory -Force -Path $installDirectory, $dataDirectory | Out-Null
 Copy-Item -LiteralPath $resolvedBinary -Destination $installedBinary -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "deep-search-service.ps1") -Destination (Join-Path $installDirectory "deep-search-service.ps1") -Force
+
+# Install the matching desktop binary and a Start Menu shortcut when the
+# release package contains both executables beside one another.
+$uiBinary = Join-Path (Split-Path -Parent $resolvedBinary) "deep-search-ui.exe"
+if (Test-Path -LiteralPath $uiBinary -PathType Leaf) {
+    $installedUi = Join-Path $installDirectory "deep-search-ui.exe"
+    Copy-Item -LiteralPath $uiBinary -Destination $installedUi -Force
+    $startMenu = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs"
+    New-Item -ItemType Directory -Force -Path $startMenu | Out-Null
+    $shortcutPath = Join-Path $startMenu "Deep-Search.lnk"
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $installedUi
+    $shortcut.WorkingDirectory = $installDirectory
+    $shortcut.Description = "Deep-Search file indexing and search"
+    $shortcut.IconLocation = "$installedUi,0"
+    $shortcut.Save()
+}
 $grant = "${UserName}:(OI)(CI)M"
 & icacls.exe $dataDirectory /inheritance:r /grant:r $grant "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" | Out-Null
 if ($LASTEXITCODE -ne 0) {
