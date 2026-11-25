@@ -382,8 +382,11 @@ impl DeepSearchApp {
                 if ui.small_button("↑").clicked() && index > 0 {
                     move_request = Some((index, -1));
                 }
-                if ui.small_button("↓").clicked() && index + 1 < columns.len() {
+                if ui.small_button("↓").clicked() && index + 1 < column_count {
                     move_request = Some((index, 1));
+                }
+                if ui.small_button("×").clicked() {
+                    remove_request = Some(index);
                 }
             });
         }
@@ -404,7 +407,6 @@ impl DeepSearchApp {
                 }
             }
         }
-        let arabic = self.arabic;
         let row_height = &mut self.active_profile_mut().row_height;
         ui.horizontal(|ui| {
             ui.label(if arabic { "ارتفاع الصف" } else { "Row height" });
