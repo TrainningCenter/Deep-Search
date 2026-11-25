@@ -422,6 +422,7 @@ fn handle_request_with_context(
             "status" => Ok(json!({
                 "indexed_files": engine.indexed_file_count()?,
                 "stop_on_logout": engine.stop_on_logout()?,
+                "logout_detection_available": current_user_session_state().is_some(),
                 "version": crate::VERSION
             })),
             "set_stop_on_logout" => {
