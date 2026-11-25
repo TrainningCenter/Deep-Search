@@ -187,6 +187,10 @@ jobs:
             dist/deep-search-docker-linux-x64.sha256
             dist/compose.yaml
             dist/Dockerfile
+            dist/compose.yaml
+            dist/Dockerfile
+            dist/compose.yaml
+            dist/Dockerfile
             dist/Dockerfile
             dist/compose.yaml
             dist/README.md
