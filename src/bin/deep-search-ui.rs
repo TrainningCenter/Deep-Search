@@ -131,6 +131,11 @@ fn default_columns() -> Vec<ColumnSetting> {
         ColumnSetting { key: "bit_rate".into(), visible: false, width: 110.0 },
         ColumnSetting { key: "sample_rate".into(), visible: false, width: 110.0 },
         ColumnSetting { key: "channels".into(), visible: false, width: 90.0 },
+        ColumnSetting { key: "image_format".into(), visible: false, width: 110.0 },
+        ColumnSetting { key: "camera_make".into(), visible: false, width: 150.0 },
+        ColumnSetting { key: "camera_model".into(), visible: false, width: 180.0 },
+        ColumnSetting { key: "captured_at".into(), visible: false, width: 170.0 },
+        ColumnSetting { key: "orientation".into(), visible: false, width: 110.0 },
         ColumnSetting { key: "path".into(), visible: true, width: 420.0 },
     ]
 }
@@ -168,6 +173,7 @@ impl UiSettings {
             settings.profiles.insert("Default".into(), default_profile(&["name", "extension", "size", "path"]));
             settings.profiles.insert("Videos".into(), default_profile(&["name", "extension", "duration", "resolution", "video_codec", "audio_codec", "frame_rate", "size", "modified", "path"]));
             settings.profiles.insert("Audio".into(), default_profile(&["name", "extension", "duration", "audio_codec", "bit_rate", "sample_rate", "channels", "size", "path"]));
+            settings.profiles.insert("Images".into(), default_profile(&["name", "extension", "resolution", "image_format", "camera_make", "camera_model", "captured_at", "orientation", "size", "path"]));
             settings.profiles.insert("Documents".into(), default_profile(&["name", "extension", "modified", "size", "path"]));
             settings.profiles.insert("Large files".into(), default_profile(&["name", "size", "extension", "path"]));
             settings.profiles.insert("NAS".into(), default_profile(&["name", "size", "modified", "path"]));
@@ -1450,7 +1456,7 @@ fn result_column_text(result: &Value, key: &str) -> String {
             (Some(width), Some(height)) => format!("{width} × {height}"),
             _ => "—".to_owned(),
         },
-        "video_codec" | "audio_codec" | "container" => media
+        "video_codec" | "audio_codec" | "container" | "image_format" | "camera_make" | "camera_model" | "captured_at" | "orientation" => media
             .and_then(|value| value.get(key)).and_then(Value::as_str)
             .unwrap_or("—").to_owned(),
         "frame_rate" => media.and_then(|value| value.get("frame_rate_milli")).and_then(Value::as_u64)
@@ -1761,6 +1767,11 @@ fn column_label(key: &str, arabic: bool) -> &'static str {
             "bit_rate" => "معدل البت",
             "sample_rate" => "معدل العينة",
             "channels" => "القنوات",
+            "image_format" => "تنسيق الصورة",
+            "camera_make" => "الشركة المصنّعة",
+            "camera_model" => "طراز الكاميرا",
+            "captured_at" => "تاريخ الالتقاط",
+            "orientation" => "الاتجاه",
             "path" => "المسار",
             _ => "عمود",
         }
@@ -1779,6 +1790,11 @@ fn column_label(key: &str, arabic: bool) -> &'static str {
             "bit_rate" => "Bit rate",
             "sample_rate" => "Sample rate",
             "channels" => "Channels",
+            "image_format" => "Image format",
+            "camera_make" => "Camera make",
+            "camera_model" => "Camera model",
+            "captured_at" => "Date taken",
+            "orientation" => "Orientation",
             "path" => "Path",
             _ => "Column",
         }
