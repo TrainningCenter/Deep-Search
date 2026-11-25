@@ -139,7 +139,8 @@ fn parse_condition(token: &str) -> Result<SearchExpression, String> {
     }
     if lower.starts_with("resolution:") {
         let value = &token[11..];
-        if let Some((width, height)) = value.split_once('x') {
+        let normalized = value.to_ascii_lowercase();
+        if let Some((width, height)) = normalized.split_once('x') {
             let width = parse_resolution_dimension(width)?;
             let height = parse_resolution_dimension(height)?;
             return Ok(SearchExpression::ResolutionEquals { width, height });
@@ -167,7 +168,7 @@ fn parse_condition(token: &str) -> Result<SearchExpression, String> {
         ]));
     }
     if token.contains(':') || lower.starts_with("size>") || lower.starts_with("size<") || lower.starts_with("duration>") || lower.starts_with("duration<") || lower.starts_with("resolution>") || lower.starts_with("resolution<") || lower.starts_with("fps>") || lower.starts_with("fps<") {
-        return Err(format!("Unknown condition '{token}'. Use name:, path:, content:, ext:, type:, size>=, size<=, duration>= or duration<="));
+        return Err(format!("Unknown condition '{token}'. Use name:, path:, source:, content:, ext:, type:, size>=, size<=, duration>=, duration<=, resolution:, resolution>=, resolution<=, fps:>= or fps:<="));
     }
     if exact {
         if token.trim().is_empty() { return Err("Quoted search terms cannot be empty".into()); }
@@ -186,6 +187,9 @@ fn parse_resolution_dimension(value: &str) -> Result<u32, String> {
 
 fn parse_resolution_threshold(value: &str) -> Result<(Option<u32>, Option<u32>), String> {
     let normalized = value.trim().to_ascii_lowercase();
+    if let Some((width, height)) = normalized.split_once('x') {
+        return Ok((Some(parse_resolution_dimension(width)?), Some(parse_resolution_dimension(height)?)));
+    }
     let threshold = match normalized.as_str() {
         "8k" => (Some(7680), None),
         "4k" | "uhd" => (Some(3840), None),
@@ -301,6 +305,14 @@ mod tests {
             SearchExpression::ResolutionEquals { width: 1920, height: 1080 }
         );
         assert_eq!(
+            parse_query("resolution:1920X1080").unwrap(),
+            SearchExpression::ResolutionEquals { width: 1920, height: 1080 }
+        );
+        assert_eq!(
+            parse_query("resolution<=1920x1080").unwrap(),
+            SearchExpression::ResolutionAtMost { max_width: Some(1920), max_height: Some(1080) }
+        );
+        assert_eq!(
             parse_query("resolution<=1080p").unwrap(),
             SearchExpression::ResolutionAtMost { max_width: None, max_height: Some(1080) }
         );
@@ -345,7 +357,7 @@ mod tests {
     fn parses_boolean_query_with_parentheses_and_size_units() {
         let parsed = parse_query(r#"name:"holiday video" AND (ext:mkv OR ext:mp4) AND size>=1GB"#).unwrap();
         assert_eq!(parsed, SearchExpression::And(vec![
-            SearchExpression::NameContains("holiday video".into()),
+            SearchExpression::NameExact("holiday video".into()),
             SearchExpression::Or(vec![
                 SearchExpression::ExtensionEquals("mkv".into()),
                 SearchExpression::ExtensionEquals("mp4".into()),
@@ -368,7 +380,7 @@ mod tests {
         assert_eq!(
             parse_query(r#"path:"project archive" AND ext:pdf"#).unwrap(),
             SearchExpression::And(vec![
-                SearchExpression::PathContains("project archive".into()),
+                SearchExpression::PathExact("project archive".into()),
                 SearchExpression::ExtensionEquals("pdf".into()),
             ])
         );
@@ -389,14 +401,7 @@ mod tests {
 
     #[test]
     fn parses_bare_terms_across_name_path_and_content() {
-        assert_eq!(
-            parse_query("docker").unwrap(),
-            SearchExpression::Or(vec![
-                SearchExpression::NameContains("docker".into()),
-                SearchExpression::PathContains("docker".into()),
-                SearchExpression::ContentContains("docker".into()),
-            ])
-        );
+        assert_eq!(parse_query("docker").unwrap(), SearchExpression::ExpandedTerm("docker".into()));
     }
 
     #[test]
@@ -404,11 +409,7 @@ mod tests {
         assert_eq!(
             parse_query(r#""holiday video" AND ext:mkv"#).unwrap(),
             SearchExpression::And(vec![
-                SearchExpression::Or(vec![
-                    SearchExpression::NameContains("holiday video".into()),
-                    SearchExpression::PathContains("holiday video".into()),
-                    SearchExpression::ContentContains("holiday video".into()),
-                ]),
+                SearchExpression::ExactTerm("holiday video".into()),
                 SearchExpression::ExtensionEquals("mkv".into()),
             ])
         );
@@ -419,7 +420,7 @@ mod tests {
         assert_eq!(
             parse_query(r#"content:"project roadmap" AND ext:txt"#).unwrap(),
             SearchExpression::And(vec![
-                SearchExpression::ContentContains("project roadmap".into()),
+                SearchExpression::ContentExact("project roadmap".into()),
                 SearchExpression::ExtensionEquals("txt".into()),
             ])
         );
