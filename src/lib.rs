@@ -3,6 +3,7 @@ pub mod content;
 pub mod database;
 pub mod engine;
 pub mod indexer;
+pub mod media;
 pub mod query;
 pub mod service;
 
