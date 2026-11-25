@@ -1,5 +1,5 @@
 
-use crate::{FileRecord, IndexingStatus};
+use crate::{media::MediaMetadata, FileRecord, IndexingStatus};
 use rusqlite::{params, params_from_iter, types::Value, Connection, OpenFlags, OptionalExtension, Result};
 use std::time::Duration;
 use serde::Serialize;
@@ -12,6 +12,23 @@ pub struct SearchResult {
     pub extension: Option<String>,
     pub size_bytes: u64,
     pub modified_timestamp_ns: Option<u64>,
+    pub media_metadata: Option<MediaMetadata>,
+}
+
+fn map_search_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<SearchResult> {
+    let path: String = row.get(0)?;
+    let size: i64 = row.get(3)?;
+    let modified: Option<i64> = row.get(4)?;
+    let metadata_json: Option<String> = row.get(5)?;
+    let media_metadata = metadata_json.and_then(|json| serde_json::from_str(&json).ok());
+    Ok(SearchResult {
+        path: path.into(),
+        name: row.get(1)?,
+        extension: row.get(2)?,
+        size_bytes: size.max(0) as u64,
+        modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
+        media_metadata,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,6 +248,11 @@ impl Database {
                 path TEXT PRIMARY KEY
             );
 
+            CREATE TABLE IF NOT EXISTS media_metadata (
+                file_path TEXT PRIMARY KEY NOT NULL REFERENCES files(path) ON DELETE CASCADE,
+                metadata_json TEXT NOT NULL
+            );
+
             ",
         )?;
 
@@ -375,6 +397,37 @@ impl Database {
                 statement.execute(params![
                     path, file.name, file.extension, size, modified, status, content
                 ])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Replace optional media metadata for changed files in one transaction.
+    /// A missing metadata value removes stale metadata from the previous version.
+    pub fn replace_media_metadata_batch(
+        &self,
+        entries: &[(std::path::PathBuf, Option<MediaMetadata>)],
+    ) -> Result<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let transaction = self.connection.unchecked_transaction()?;
+        {
+            let mut delete = transaction.prepare(
+                "DELETE FROM media_metadata WHERE file_path = ?1"
+            )?;
+            let mut insert = transaction.prepare(
+                "INSERT INTO media_metadata(file_path, metadata_json) VALUES (?1, ?2)"
+            )?;
+            for (path, metadata) in entries {
+                let path = path.to_string_lossy().into_owned();
+                delete.execute([&path])?;
+                if let Some(metadata) = metadata {
+                    let json = serde_json::to_string(metadata)
+                        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+                    insert.execute(params![path, json])?;
+                }
             }
         }
         transaction.commit()?;
@@ -588,21 +641,10 @@ impl Database {
         let condition = compile_expression(expression, &mut values);
         let relevance = name_relevance_order(expression, &mut values);
         let sql = format!(
-            "SELECT path, name, extension, size_bytes, modified_unix FROM files WHERE {condition} ORDER BY {relevance}, name COLLATE NOCASE"
+            "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path) FROM files WHERE {condition} ORDER BY {relevance}, name COLLATE NOCASE"
         );
         let mut statement = self.connection.prepare(&sql)?;
-        let rows = statement.query_map(params_from_iter(values.iter()), |row| {
-            let path: String = row.get(0)?;
-            let size: i64 = row.get(3)?;
-            let modified: Option<i64> = row.get(4)?;
-            Ok(SearchResult {
-                path: path.into(),
-                name: row.get(1)?,
-                extension: row.get(2)?,
-                size_bytes: size.max(0) as u64,
-                modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
-            })
-        })?;
+        let rows = statement.query_map(params_from_iter(values.iter()), map_search_result)?;
         rows.collect()
     }
 
@@ -655,7 +697,7 @@ impl Database {
         values.push(Value::Integer(limit.clamp(1, 1000) as i64));
         values.push(Value::Integer(offset.min(i64::MAX as u64) as i64));
         let sql = format!(
-            "SELECT path, name, extension, size_bytes, modified_unix FROM files
+            "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path) FROM files
              WHERE {condition}
              ORDER BY {order_by}
              LIMIT ?{} OFFSET ?{}",
@@ -663,18 +705,7 @@ impl Database {
             values.len()
         );
         let mut statement = self.connection.prepare(&sql)?;
-        let rows = statement.query_map(params_from_iter(values.iter()), |row| {
-            let path: String = row.get(0)?;
-            let size: i64 = row.get(3)?;
-            let modified: Option<i64> = row.get(4)?;
-            Ok(SearchResult {
-                path: path.into(),
-                name: row.get(1)?,
-                extension: row.get(2)?,
-                size_bytes: size.max(0) as u64,
-                modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
-            })
-        })?;
+        let rows = statement.query_map(params_from_iter(values.iter()), map_search_result)?;
         rows.collect()
     }
 
@@ -699,7 +730,7 @@ impl Database {
         if term.chars().count() >= 3 {
             let phrase = format!("\"{}\"", term.replace('"', "\"\""));
             let mut statement = self.connection.prepare(
-                "SELECT path, name, extension, size_bytes, modified_unix FROM files
+                "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path) FROM files
                  WHERE id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?1)
                  ORDER BY name COLLATE NOCASE"
             )?;
@@ -723,7 +754,7 @@ impl Database {
                 .replace('_', "\\_");
             let pattern = format!("%{escaped}%");
             let mut statement = self.connection.prepare(
-                "SELECT path, name, extension, size_bytes, modified_unix FROM files
+                "SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path) FROM files
                  WHERE content LIKE ?1 ESCAPE '\\' COLLATE NOCASE
                  ORDER BY name COLLATE NOCASE"
             )?;
@@ -758,7 +789,7 @@ impl Database {
 
         let mut statement = self.connection.prepare(
             "
-            SELECT path, name, extension, size_bytes, modified_unix
+            SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path)
             FROM files
             WHERE name LIKE ?1 ESCAPE '\\' COLLATE NOCASE
             ORDER BY
@@ -771,19 +802,7 @@ impl Database {
             ",
         )?;
 
-        let rows = statement.query_map(params![pattern, term, prefix], |row| {
-            let path: String = row.get(0)?;
-            let size: i64 = row.get(3)?;
-            let modified: Option<i64> = row.get(4)?;
-
-            Ok(SearchResult {
-                path: path.into(),
-                name: row.get(1)?,
-                extension: row.get(2)?,
-                size_bytes: size.max(0) as u64,
-                modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
-            })
-        })?;
+        let rows = statement.query_map(params![pattern, term, prefix], map_search_result)?;
 
         rows.collect()
     }
@@ -798,26 +817,14 @@ impl Database {
 
         let mut statement = self.connection.prepare(
             "
-            SELECT path, name, extension, size_bytes, modified_unix
+            SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path)
             FROM files
             WHERE extension = ?1 COLLATE NOCASE
             ORDER BY name COLLATE NOCASE
             ",
         )?;
 
-        let rows = statement.query_map([extension], |row| {
-            let path: String = row.get(0)?;
-            let size: i64 = row.get(3)?;
-            let modified: Option<i64> = row.get(4)?;
-
-            Ok(SearchResult {
-                path: path.into(),
-                name: row.get(1)?,
-                extension: row.get(2)?,
-                size_bytes: size.max(0) as u64,
-                modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
-            })
-        })?;
+        let rows = statement.query_map([extension], map_search_result)?;
 
         rows.collect()
     }
@@ -832,7 +839,7 @@ impl Database {
 
         let mut statement = self.connection.prepare(
             "
-            SELECT path, name, extension, size_bytes, modified_unix
+            SELECT path, name, extension, size_bytes, modified_unix, (SELECT metadata_json FROM media_metadata WHERE file_path = files.path)
             FROM files
             WHERE (?1 IS NULL OR size_bytes >= ?1)
               AND (?2 IS NULL OR size_bytes <= ?2)
@@ -842,19 +849,7 @@ impl Database {
 
         let rows = statement.query_map(
             params![min_size, max_size],
-            |row| {
-                let path: String = row.get(0)?;
-                let size: i64 = row.get(3)?;
-            let modified: Option<i64> = row.get(4)?;
-
-                Ok(SearchResult {
-                    path: path.into(),
-                    name: row.get(1)?,
-                    extension: row.get(2)?,
-                    size_bytes: size.max(0) as u64,
-                    modified_timestamp_ns: modified.map(|value| value.max(0) as u64),
-                })
-            },
+            map_search_result,
         )?;
 
         rows.collect()
