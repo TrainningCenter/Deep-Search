@@ -43,6 +43,14 @@ impl SearchEngine {
         self.database.index_roots()
     }
 
+    pub fn stop_on_logout(&self) -> Result<bool> {
+        self.database.stop_on_logout()
+    }
+
+    pub fn set_stop_on_logout(&self, enabled: bool) -> Result<()> {
+        self.database.set_stop_on_logout(enabled)
+    }
+
     pub fn index_paths<P: AsRef<Path>>(
         &self,
         paths: &[P],
