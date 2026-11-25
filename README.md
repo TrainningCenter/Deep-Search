@@ -30,7 +30,7 @@ A fast, lightweight, cross-platform file indexing and search engine written in R
 
 ## Current capabilities
 
-- Incremental file indexing with batched SQLite writes.
+- Incremental file indexing with batched SQLite writes and parallel CPU-based document extraction.
 - Persistent indexing roots and automatic filesystem change monitoring (create, modify, rename, delete) with debounced targeted refreshes; a 10-minute reconciliation pass catches missed events and changes on filesystems with limited notification support.
 - SQLite-backed metadata storage and full-text content search (FTS5).
 - Search by file name, path, content, extension, file category, and size range.
@@ -128,7 +128,7 @@ Available request examples (send each as a single line):
 {"command":"content","term":"quarterly revenue"}
 ```
 
-The service currently supports `status`, `index`, `search`, and `content`. Search accepts optional `limit` (1–1000 results per transport batch, default 100), `offset` (default 0), `sort` (`relevance`, `name`, `path`, `extension`, `size`, or `modified`), and `order` (`asc` or `desc`). **There is no maximum total number of search matches:** clients retrieve subsequent batches by increasing `offset` until `has_more` is false. The desktop interface will combine those batches into one continuous results table; users will not navigate pages or lose results because of the batch size. The response includes `results`, `total`, `limit`, `offset`, and `has_more`. Responses contain `ok: true` and a `data` object on success, or `ok: false` and an `error` string on failure.
+The service currently supports `status`, `index`, `search`, and `content`. Each client connection gets its own SQLite connection, allowing multiple local clients to search concurrently while index writes are serialized. SQLite WAL mode lets readers continue during indexing. Search accepts optional `limit` (1–1000 results per transport batch, default 100), `offset` (default 0), `sort` (`relevance`, `name`, `path`, `extension`, `size`, or `modified`), and `order` (`asc` or `desc`). **There is no maximum total number of search matches:** clients retrieve subsequent batches by increasing `offset` until `has_more` is false. The desktop interface will combine those batches into one continuous results table; users will not navigate pages or lose results because of the batch size. The response includes `results`, `total`, `limit`, `offset`, and `has_more`. Responses contain `ok: true` and a `data` object on success, or `ok: false` and an `error` string on failure.
 
 Rust applications can use the built-in service client to retrieve the complete result set without managing offsets themselves:
 
