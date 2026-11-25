@@ -22,7 +22,7 @@ For development, run it with:
 cargo run --features desktop --bin deep-search-ui
 ```
 
-The desktop alpha currently provides automatic connection to the local service on launch, indexing-path entry (native folder picker and drag-and-drop paths), query input, sorting, and a resizable results table. The results view supports adding/removing/showing/hiding columns, drag-and-drop or button-based reordering, adjusting each column's width, row-height control, content-based auto-fit (sampling up to 500 loaded results), and persistent named view profiles. Default profiles include Default, Videos, Documents, Large files, and NAS. Profiles are stored locally in the user's application configuration directory. An Arabic-language toggle is available for the main controls and result table direction. With the platform service helper installed, the UI exposes runtime start/stop and a boot-startup toggle on Linux, macOS, and Windows, using the platform's authorization prompt. Full Arabic contextual shaping, tray integration, and frozen columns remain in development. Platform service controls are wired to the Linux systemd, macOS launchd, and Windows Task Scheduler helpers; they still need runtime verification on physical macOS and Windows machines. The app loads an installed system Arabic font as a fallback when available. Separate macOS launchd and Windows startup-task installers are included in their platform packages.
+The desktop alpha currently provides automatic connection to the local service on launch, indexing-path entry (native folder picker and drag-and-drop paths), query input, sorting, and a resizable results table. The results view supports adding/removing/showing/hiding columns, drag-and-drop or button-based reordering, adjusting each column's width, row-height control, content-based auto-fit (sampling up to 500 loaded results), and persistent named view profiles. Default profiles include Default, Videos, Documents, Large files, and NAS. Profiles are stored locally in the user's application configuration directory. An Arabic-language toggle and installed-font fallback are available, but complete right-to-left layout and contextual shaping still need work. With the platform service helper installed, the UI exposes runtime start/stop and a boot-startup toggle on Linux, macOS, and Windows, using the platform's authorization prompt. Tray integration remains future work; frozen leading columns are supported by the current table. Platform service controls are wired to the Linux systemd, macOS launchd, and Windows Task Scheduler helpers; they still need runtime verification on physical macOS and Windows machines. The app loads an installed system Arabic font as a fallback when available. Separate macOS launchd and Windows startup-task installers are included in their platform packages.
 
 
 
@@ -150,7 +150,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 `search_all` automatically requests each batch, appends it to one collection, checks that the total remains consistent, and reports incomplete responses instead of silently dropping results.
 
 
-**Security and lifecycle:** the service is loopback-only by default and has no authentication, TLS, or remote/NAS transport. Do not expose it to an untrusted network. Linux systemd boot startup is available; tray integration and Windows/macOS service installers remain future work.
+**Security and lifecycle:** the service is loopback-only by default and has no authentication, TLS, or remote client transport. Do not expose it to an untrusted network. The indexer can index local folders and already-mounted network shares; remote access to the service itself is not implemented. Boot-start installers are included for Linux systemd, macOS launchd, and Windows Task Scheduler. Tray integration and physical runtime validation of the macOS/Windows service managers remain future work.
 
 ### Linux system service (systemd)
 
@@ -186,7 +186,7 @@ To uninstall only that user's service instance (the index database is preserved)
 sudo packaging/linux/systemd/uninstall-service.sh "$USER"
 ```
 
-The installer requires systemd, root privileges, an existing non-root Linux account, and a compiled executable. The service inherits that account's filesystem permissions; it can index only locations that account can read. The unit uses a restrictive umask and binds the engine to loopback by default. The Settings UI toggle for automatic startup, and equivalent Windows/macOS installers, are not implemented yet.
+The installer requires systemd, root privileges, an existing non-root Linux account, and a compiled executable. The service inherits that account's filesystem permissions; it can index only locations that account can read. The unit uses a restrictive umask and binds the engine to loopback by default. The desktop Settings panel can enable or disable boot startup through the installed service helper. Equivalent installers and helpers are included in the macOS and Windows packages; physical runtime validation is still required on those platforms.
 
 ### macOS background service (launchd)
 
@@ -257,6 +257,6 @@ Size units include `B`, `KB`/`KiB`, `MB`/`MiB`, `GB`/`GiB`, and `TB`/`TiB`. Bool
 
 ## Project direction
 
-The product separates the background indexing/search engine from its user interface and is intended to support Local, NAS, and Remote operating modes. The current repository contains the Rust engine, local JSON service, and an initial Linux systemd lifecycle controller; the desktop interface and cross-platform service managers are still under development.
+The product separates the background indexing/search engine from its user interface and is intended to support Local, NAS, and Remote operating modes. The current repository contains the Rust engine, local JSON service, desktop interface, filesystem change watcher, and platform service managers for Linux systemd, macOS launchd, and Windows Task Scheduler. Remote service transport, tray integration, and full Arabic RTL behavior remain under development.
 
 Linux is the first-priority platform, followed by Windows and macOS.
