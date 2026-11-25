@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 const MAX_REQUEST_BYTES: usize = 1_048_576;
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
+// Bound per-connection worker threads so local clients cannot exhaust the service.
+const MAX_CLIENT_CONNECTIONS: usize = 64;
 
 /// Run the local JSON-line service. It intentionally binds to loopback by default;
 /// remote/NAS access requires a separately secured transport layer.
@@ -56,6 +58,14 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
         match listener.accept() {
             Ok((stream, _)) => {
                 client_threads.retain(|worker: &thread::JoinHandle<()>| !worker.is_finished());
+                if client_threads.len() >= MAX_CLIENT_CONNECTIONS {
+                    let mut stream = stream;
+                    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+                    let _ = stream.write_all(
+                        b"{\"ok\":false,\"error\":\"Service is busy; maximum concurrent client connections reached\"}\n",
+                    );
+                    continue;
+                }
                 let database_path = watcher_database_path.clone();
                 let watch_roots = watch_roots.clone();
                 let index_lock = Arc::clone(&index_lock);
