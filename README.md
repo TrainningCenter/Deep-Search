@@ -133,9 +133,11 @@ Search indexed document contents:
 deep-search content index.sqlite "quarterly revenue"
 ```
 
-Use the query language:
+Use the query language. Bare terms search file names, paths, and indexed contents; quote multi-word phrases. Field qualifiers remain available for precise searches:
 
 ```bash
+deep-search query index.sqlite 'report'
+deep-search query index.sqlite '"holiday video" AND type:video'
 deep-search query index.sqlite 'name:"holiday video" AND (ext:mkv OR ext:mp4) AND size>=1GB'
 deep-search query index.sqlite 'type:document AND path:"project archive"'
 deep-search query index.sqlite 'content:"project roadmap" AND ext:pdf'
