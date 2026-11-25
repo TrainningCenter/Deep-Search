@@ -1,0 +1,65 @@
+name: Linux Desktop Package
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/**"
+      - "packaging/linux/**"
+      - ".github/workflows/release-linux.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-linux-x86_64:
+    name: Build Linux x86_64 alpha package
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgl1-mesa-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-cursor-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build engine and desktop application
+        run: cargo build --locked --release --features desktop --bins
+
+      - name: Assemble installable package
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="dist/Deep-Search-linux-x86_64"
+          mkdir -p "$package/packaging"
+          install -m 0755 target/release/deep-search "$package/deep-search"
+          install -m 0755 target/release/deep-search-ui "$package/deep-search-ui"
+          cp -a packaging/linux "$package/packaging/linux"
+          cp README.md "$package/README.md"
+          chmod 0755 "$package/packaging/linux/install.sh"
+          chmod 0755 "$package/packaging/linux/systemd/"*.sh
+          tar -C dist -czf dist/Deep-Search-linux-x86_64.tar.gz Deep-Search-linux-x86_64
+          cd dist
+          sha256sum Deep-Search-linux-x86_64.tar.gz > Deep-Search-linux-x86_64.tar.gz.sha256
+
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Deep-Search-linux-x86_64
+          path: |
+            dist/Deep-Search-linux-x86_64.tar.gz
+            dist/Deep-Search-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
