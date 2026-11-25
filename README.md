@@ -2,54 +2,77 @@
 
 # Download prebuilt alpha packages
 
-GitHub Actions builds precompiled desktop packages for Linux x86_64, Windows x64, and macOS Apple Silicon. Open the [Deep-Search Alpha Builds workflow](https://github.com/TrainningCenter/Deep-Search/actions/workflows/release.yml), select the latest **successful** run, and download the artifact for your platform:
+**Ready-to-use downloads are published on the GitHub Releases page** — you do not need to download workflow artifacts.
 
-- Linux: `deep-search-linux-x64`
-- Windows: `deep-search-windows-x64`
-- macOS Apple Silicon: `deep-search-macos-arm64`
-- Docker service (Linux x64): `deep-search-docker-linux-x64`
+Open the [latest Deep-Search Alpha Release](https://github.com/TrainningCenter/Deep-Search/releases/latest) and download the package for your platform:
 
-For Linux, extract the downloaded archive, open a terminal in the extracted directory, and install the desktop application and background service with:
+| Platform | Release asset |
+| --- | --- |
+| Windows 10/11, x64 | `deep-search-windows-x64.zip` |
+| Linux, x86_64 | `deep-search-linux-x64.tar.gz` |
+| macOS, Apple Silicon (ARM64) | `deep-search-macos-arm64.tar.gz` |
+| Docker service, Linux x86_64 | `deep-search-docker-linux-x64.tar` |
+
+Each package has a matching `.sha256` file. Verify downloads before installation:
+
+- Linux/macOS: `sha256sum -c deep-search-<platform>.sha256`
+- Windows PowerShell: compare `(Get-FileHash .\\deep-search-windows-x64.zip -Algorithm SHA256).Hash.ToLower()` with the hash in `deep-search-windows-x64.sha256`.
+
+## Install the desktop application and background service
+
+### Linux
+
+1. Extract `deep-search-linux-x64.tar.gz`.
+2. Open a terminal in the extracted directory.
+3. Install the desktop application and boot-starting background service for your current account:
 
 ```bash
 sudo bash packaging/linux/install.sh "$USER"
 ```
 
-For Windows, extract the downloaded artifact and then extract the included `deep-search-windows-x64.zip`. Open **PowerShell as Administrator** in the extracted package directory. Run:
+Launch **Deep-Search** from the desktop application menu, or run `deep-search-ui`. The installer places the UI in `/usr/local/bin` and enables the systemd service at boot.
+
+### Windows 10/11 (x64)
+
+1. Extract `deep-search-windows-x64.zip`. This is the complete package; there is no second archive to extract.
+2. Open **PowerShell as Administrator** in the extracted directory.
+3. Run:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\packaging\windows\task-scheduler\install-service.ps1 -UserName "$env:USERDOMAIN\$env:USERNAME" -BinaryPath ".\deep-search.exe"
+.\\packaging\\windows\\task-scheduler\\install-service.ps1 -UserName "$env:USERDOMAIN\\$env:USERNAME" -BinaryPath ".\\deep-search.exe"
 ```
 
 The installer copies both executables into Program Files, creates a Start Menu shortcut, and registers the background service to start at boot. By default, Windows S4U logon cannot access password-protected network shares. To enable authenticated UNC/NAS shares, add `-EnableAuthenticatedNetworkShares`; the installer will ask for the account password.
 
-For macOS Apple Silicon, extract the downloaded artifact and then extract `deep-search-macos-arm64.tar.gz`. In Terminal, from the extracted package directory, run:
+### macOS (Apple Silicon)
+
+1. Extract `deep-search-macos-arm64.tar.gz`.
+2. Open Terminal in the extracted directory.
+3. Run:
 
 ```bash
 sudo bash packaging/macos/launchd/install-service.sh "$USER" "./deep-search"
 ```
 
-This installs the background LaunchDaemon and, when the desktop binary is present, creates `/Applications/Deep-Search.app`.
+This installs the background LaunchDaemon and creates `/Applications/Deep-Search.app`.
 
-These are alpha builds. The workflow runs the automated tests before packaging; hardware-specific desktop behavior and physical Windows/macOS service behavior still require real-machine validation.
+These are alpha builds. Automated tests and cross-platform builds run before publishing. Hardware-specific desktop behavior and physical Windows/macOS service behavior still need real-machine validation.
 
-## Docker service (headless)
+## Docker service (headless, Linux x86_64)
 
-The Docker image runs the indexing/search engine without a desktop window. Keep the desktop UI on the host; it connects to the container through the loopback service port.
+The Docker package contains the prebuilt image archive, Compose file, Dockerfile, README, and checksum.
 
-1. Download and extract the `deep-search-docker-linux-x64` artifact from the Alpha Builds workflow. It includes the image archive, checksum, `Dockerfile`, `compose.yaml`, and this README.
-2. Create a `scan` folder beside `compose.yaml`, or edit the bind mount to point directly to a mounted NAS/network share.
-3. Load the prebuilt image and start the service:
+1. Download and extract `deep-search-docker-linux-x64.tar`.
+2. Create a `scan` folder beside `compose.yaml`, or edit the bind mount to point to a mounted NAS/network share.
+3. Load the image and start the service:
 
 ```bash
 docker load -i deep-search-docker-linux-x64.tar
 docker compose up -d
 ```
 
-To build the image from the repository source ZIP instead, use `docker compose up -d --build`.
-
-The Compose file binds the service to `127.0.0.1:4765` only, stores the index in a persistent Docker volume, and mounts `./scan` read-only at `/scan`. In the desktop application's indexing-path field, enter `/scan`. For a NAS mount, replace `./scan:/scan:ro` with the host mount, for example `/mnt/nas:/scan:ro`.
+The Compose file publishes the service on `127.0.0.1:4765` only, stores the index in a persistent Docker volume, and mounts `./scan` read-only at `/scan`. In the desktop application's indexing-path field, enter `/scan`. For a NAS mount, replace `./scan:/scan:ro` with the host mount, for example `/mnt/nas:/scan:ro`.
 
 Useful commands:
 
@@ -58,7 +81,7 @@ docker compose logs -f
 docker compose down
 ```
 
-The service has no authentication/TLS layer yet and enforces loopback-only binding for normal host installations. The Docker image has an explicit container mode so the service can bind to the isolated container bridge; the supplied Compose file publishes it on host loopback only (`127.0.0.1:4765`). Do not change that host binding to `0.0.0.0` or expose the container port to an untrusted network. Remote service access must wait for the secured transport implementation.
+The service has no authentication/TLS layer yet. Do not change the host binding to `0.0.0.0` or expose the container port to an untrusted network. Remote service access must wait for the secured transport implementation.
 
 # Desktop application (alpha)
 
@@ -82,11 +105,7 @@ For development, run it with:
 cargo run --features desktop --bin deep-search-ui
 ```
 
-The desktop alpha currently provides automatic connection to the local service on launch, indexing-path entry (native folder picker and drag-and-drop paths), query input, sorting, and a resizable results table. The results view supports adding/removing/showing/hiding columns, drag-and-drop or button-based reordering, adjusting each column's width, row-height control, content-based auto-fit (sampling up to 500 loaded results), and persistent named view profiles. Default profiles include Default, Videos, Audio, Documents, Large files, and NAS. The Videos and Audio profiles expose optional media columns such as duration, resolution, codecs, frame rate, bit rate, sample rate, and channels. Profiles are stored locally in the user's application configuration directory. An Arabic-language toggle, contextual letter shaping, Unicode bidirectional rendering for labels and result text, and mirrored table-column order are implemented. Text-edit cursor/selection behavior and full RTL interaction still need real-use validation. With the platform service helper installed, the UI exposes runtime start/stop and a boot-startup toggle on Linux, macOS, and Windows, using the platform's authorization prompt. It also offers **Stop service when user logs out**, disabled by default; when enabled, the background service waits for the account's first login session and exits cleanly after logout. If the OS cannot reliably report the session state, the service stays running rather than stopping unexpectedly. The UI disables this option and explains the limitation when session detection is unavailable. The system tray is enabled by default and provides Open, Pause/Resume Indexing, Start/Stop Engine, Settings, and Exit actions. Closing the main window hides it in the tray by default; both tray visibility and close-to-tray behavior are configurable in application settings. Desktop notifications are configurable independently: indexing-failure notifications are enabled by default, while completion and service start/stop notifications are disabled by default. NAS disconnect/reconnect monitoring is available from Application settings: add each mounted network-share path on a separate line, then optionally enable notifications. The desktop checks configured locations every 15 seconds. Linux detects network mounts from `/proc/self/mountinfo`, macOS checks mounted SMB/NFS/AFP/WebDAV volumes, and Windows currently monitors UNC paths (`\\server\\share`); mapped network drive letters are not detected yet. The initial check establishes the baseline without sending a notification. Frozen leading columns are supported by the current table. Platform service controls are wired to the Linux systemd, macOS launchd, and Windows Task Scheduler helpers; they still need runtime verification on physical macOS and Windows machines. The app loads an installed system Arabic font as a fallback when available. Separate macOS launchd and Windows startup-task installers are included in their platform packages.
-
-
-
-A fast, lightweight, cross-platform file indexing and search engine written in Rust.
+The desktop alpha currently provides automatic connection to the local service on launch, indexing-path entry (native folder picker and drag-and-drop paths), query input, sorting, and a resizable results table. The results view supports adding/removing/showing/hiding columns, drag-and-drop or button-based reordering, adjusting each column's width, row-height control, content-based auto-fit (sampling up to 500 loaded results), and persistent named view profiles. Default profiles include Default, Videos, Audio, Documents, Large files, and NAS. The Videos and Audio profiles expose optional media columns such as duration, resolution, codecs, frame rate, bit rate, sample rate, and channels. Profiles are stored locally in the user's application configuration directory. An Arabic-language toggle, contextual letter shaping, Unicode bidirectional rendering for labels and result text, and mirrored table-column order are implemented. Text-edit cursor/selection behavior and full RTL interaction still need real-use validation. With the platform service helper installed, the UI exposes runtime start/stop and a boot-startup toggle on Linux, macOS, and Windows, using the platform's authorization prompt. It also offers **Stop service when user logs out**, disabled by default; when enabled, the background service waits for the account's first login session and exits cleanly after logout. If the OS cannot reliably report the session state, the service stays running rather than stopping unexpectedly. The UI disables this option and explains the limitation when session detection is unavailable. The system tray is enabled by default and provides Open, Pause/Resume Indexing, Start/Stop Engine, Settings, and Exit actions. Closing the main window hides it in the tray by default; both tray visibility and close-to-tray behavior are configurable in application settings. Desktop notifications are configurable independently: indexing-failure notifications are enabled by default, while completion and service start/stop notifications are disabled by default. NAS disconnect/reconnect monitoring is available from Application settings: add each mounted network-share path on a separate line, then optionally enable notifications. The desktop checks configured locations every 15 seconds. Linux detects network mounts from `/proc/self/mountinfo`, macOS checks mounted SMB/NFS/AFP/WebDAV volumes, and Windows monitors UNC paths and mapped network drive letters when visible to the running process. The initial check establishes the baseline without sending a notification. Frozen leading columns are supported by the current table. Platform service controls are wired to the Linux systemd, macOS launchd, and Windows Task Scheduler helpers; they still need runtime verification on physical macOS and Windows machines. The app loads an installed system Arabic font as a fallback when available. Separate macOS launchd and Windows startup-task installers are included in their platform packages.
 
 ## Current capabilities
 
