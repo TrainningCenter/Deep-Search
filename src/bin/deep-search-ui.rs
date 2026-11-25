@@ -405,7 +405,8 @@ impl DeepSearchApp {
             if let (Some(source), Some(target)) = (next_dragged_column.take(), hovered_target) {
                 if source != target && source < columns.len() {
                     let moved = columns.remove(source);
-                    columns.insert(target.min(columns.len()), moved);
+                    let insertion_index = if source < target { target - 1 } else { target };
+                    columns.insert(insertion_index.min(columns.len()), moved);
                     changed = true;
                 }
             } else {
