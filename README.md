@@ -223,7 +223,7 @@ The Windows package includes an elevated PowerShell installer. It registers a Ta
 .\packaging\windows\task-scheduler\install-service.ps1 -UserName $env:USERNAME -BinaryPath .\deep-search.exe
 ```
 
-The task uses an S4U logon and does not store the user's password. This means it can index local files accessible to that account, but it cannot access authenticated network shares using the user's saved network credentials. Use a service account and a different authenticated deployment approach if network-share credentials are required.
+By default, the task uses an S4U logon and does not store the user's password; this supports local storage but cannot authenticate to protected network shares. To allow access to authenticated NAS/SMB shares through UNC paths, run the installer with `-EnableAuthenticatedNetworkShares`. It will request the account password and let Windows Task Scheduler protect the stored task credential. Use this only when needed and ensure the selected account has the required share and filesystem permissions.
 
 Manage the task from an elevated PowerShell session:
 
