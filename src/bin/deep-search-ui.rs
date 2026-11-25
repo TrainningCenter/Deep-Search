@@ -289,7 +289,7 @@ impl DeepSearchApp {
                 }));
                     let menu_sender = self.sender.clone();
                     let menu_ctx = ctx.clone();
-                    MenuEvent::set_event_handler(Some(move |event| {
+                    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
                     // egui 0.31 does not run App::update for a hidden root
                     // viewport. Restore it before dispatching the action so
                     // quick controls are handled reliably on every platform.
