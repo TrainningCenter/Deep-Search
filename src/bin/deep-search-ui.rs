@@ -273,6 +273,12 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Deep-Search",
         options,
-        Box::new(|_creation_context| Ok(Box::new(DeepSearchApp::default()))),
+        Box::new(|_creation_context| {
+            let mut app = DeepSearchApp::default();
+            // Try the local background service immediately when the window opens.
+            // The user can still change the address and reconnect manually.
+            app.check_status();
+            Ok(Box::new(app))
+        }),
     )
 }
