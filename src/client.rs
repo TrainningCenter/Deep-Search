@@ -213,6 +213,40 @@ mod tests {
     }
 
     #[test]
+    fn search_with_batches_reports_incremental_progress() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap()).read_line(&mut line).unwrap();
+            let request: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(request["command"], "search");
+            serde_json::to_writer(&mut stream, &json!({
+                "ok": true,
+                "data": {
+                    "results": [{"name": "docker-smoke.txt"}],
+                    "total": 1,
+                    "limit": 1000,
+                    "offset": 0,
+                    "has_more": false
+                }
+            })).unwrap();
+            stream.write_all(b"\\n").unwrap();
+        });
+
+        let mut progress = Vec::new();
+        let total = ServiceClient::new(address.to_string())
+            .search_with_batches("docker", "name", "asc", |batch, received, total| {
+                progress.push((batch.len() as u64, received, total));
+            }).unwrap();
+        server.join().unwrap();
+
+        assert_eq!(total, 1);
+        assert_eq!(progress, vec![(1, 1, 1)]);
+    }
+
+    #[test]
     fn rejects_inconsistent_or_incomplete_batch_sequences() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
