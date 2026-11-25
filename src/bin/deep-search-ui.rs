@@ -543,12 +543,22 @@ struct ResultsTableDelegate<'a> {
 
 impl TableDelegate for ResultsTableDelegate<'_> {
     fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell: &HeaderCellInfo) {
+        *ui.layout_mut() = if self.arabic {
+            egui::Layout::right_to_left(egui::Align::Center)
+        } else {
+            egui::Layout::left_to_right(egui::Align::Center)
+        };
         if let Some(column) = self.columns.get(cell.col_range.start) {
             ui.strong(column_label(&column.key, self.arabic));
         }
     }
 
     fn cell_ui(&mut self, ui: &mut egui::Ui, cell: &CellInfo) {
+        *ui.layout_mut() = if self.arabic {
+            egui::Layout::right_to_left(egui::Align::Center)
+        } else {
+            egui::Layout::left_to_right(egui::Align::Center)
+        };
         let Some(column) = self.columns.get(cell.col_nr) else { return; };
         let Some(result) = self.results.get(cell.row_nr as usize) else { return; };
         if cell.row_nr % 2 == 1 {
