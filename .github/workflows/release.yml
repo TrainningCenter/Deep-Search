@@ -1,6 +1,10 @@
 name: Deep-Search Alpha Builds
 
 on:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
   workflow_dispatch:
   push:
     branches:
