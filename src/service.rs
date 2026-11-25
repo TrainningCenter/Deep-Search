@@ -226,23 +226,38 @@ mod tests {
         assert_eq!(indexed.errors, 0);
         assert_eq!(indexed.files_saved, 1005);
 
-        let first_batch = handle_request(
-            r#"{"command":"search","query":"name:report","limit":1000,"offset":0}"#,
-            &engine,
-        );
-        assert_eq!(first_batch["ok"], true);
-        assert_eq!(first_batch["data"]["total"], 1005);
-        assert_eq!(first_batch["data"]["results"].as_array().unwrap().len(), 1000);
-        assert_eq!(first_batch["data"]["has_more"], true);
+        // Model the desktop client's behavior: fetch each transport batch automatically
+        // and append it to one continuous result collection until the server says stop.
+        let mut offset = 0_u64;
+        let mut all_names = Vec::new();
+        loop {
+            let request = format!(
+                r#"{{"command":"search","query":"name:report","limit":1000,"offset":{offset},"sort":"name","order":"asc"}}"#
+            );
+            let response = handle_request(&request, &engine);
+            assert_eq!(response["ok"], true);
+            assert_eq!(response["data"]["total"], 1005);
 
-        let second_batch = handle_request(
-            r#"{"command":"search","query":"name:report","limit":1000,"offset":1000}"#,
-            &engine,
-        );
-        assert_eq!(second_batch["ok"], true);
-        assert_eq!(second_batch["data"]["total"], 1005);
-        assert_eq!(second_batch["data"]["results"].as_array().unwrap().len(), 5);
-        assert_eq!(second_batch["data"]["has_more"], false);
+            let batch = response["data"]["results"].as_array().unwrap();
+            assert!(batch.len() <= 1000);
+            assert!(!batch.is_empty());
+            all_names.extend(batch.iter().map(|item| {
+                item["name"].as_str().unwrap().to_owned()
+            }));
+            offset += batch.len() as u64;
+
+            if !response["data"]["has_more"].as_bool().unwrap() {
+                break;
+            }
+        }
+
+        assert_eq!(all_names.len(), 1005);
+        let mut unique_names = all_names.clone();
+        unique_names.sort();
+        unique_names.dedup();
+        assert_eq!(unique_names.len(), 1005);
+        assert_eq!(all_names.first().unwrap(), "report-0000.txt");
+        assert_eq!(all_names.last().unwrap(), "report-1004.txt");
 
         drop(engine);
         let _ = std::fs::remove_dir_all(base);
