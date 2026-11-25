@@ -1,4 +1,4 @@
-use deep_search::client::{CompleteSearch, ServiceClient};
+use deep_search::client::ServiceClient;
 use eframe::egui;
 use egui_table::{AutoSizeMode, CellInfo, Column as TableColumn, HeaderCellInfo, HeaderRow, Table, TableDelegate, TableState};
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,8 @@ use std::thread;
 enum UiMessage {
     Status(Value),
     Indexed(Value),
-    Search(CompleteSearch),
+    SearchProgress { batch: Vec<Value>, loaded: u64, total: u64 },
+    SearchFinished { total: u64 },
     Error(String),
     ServiceState { active: Option<bool>, enabled: Option<bool>, detail: String },
     ServiceAction { action: String, success: bool, detail: String },
@@ -347,18 +348,23 @@ impl DeepSearchApp {
         self.results.clear();
         self.total = 0;
         thread::spawn(move || {
-            let result = client.search_all(&query, &sort, &order)
-                .map(UiMessage::Search)
-                .unwrap_or_else(|error| UiMessage::Error(error.to_string()));
-            let _ = sender.send(result);
+            let progress_sender = sender.clone();
+            let result = client.search_with_batches(&query, &sort, &order, move |batch, loaded, total| {
+                let _ = progress_sender.send(UiMessage::SearchProgress { batch, loaded, total });
+            });
+            let message = match result {
+                Ok(total) => UiMessage::SearchFinished { total },
+                Err(error) => UiMessage::Error(error.to_string()),
+            };
+            let _ = sender.send(message);
         });
     }
 
     fn receive_messages(&mut self) {
         while let Ok(message) = self.receiver.try_recv() {
-            self.busy = false;
             match message {
                 UiMessage::Status(status) => {
+                    self.busy = false;
                     self.indexed_files = status.get("indexed_files").and_then(Value::as_u64);
                     self.stop_on_logout = status.get("stop_on_logout").and_then(Value::as_bool);
                     self.logout_detection_available = status.get("logout_detection_available").and_then(Value::as_bool);
@@ -368,6 +374,7 @@ impl DeepSearchApp {
                     );
                 }
                 UiMessage::Indexed(report) => {
+                    self.busy = false;
                     let saved = report.get("files_saved").and_then(Value::as_u64).unwrap_or(0);
                     let discovered = report.get("files_discovered").and_then(Value::as_u64).unwrap_or(0);
                     let errors = report.get("errors").and_then(Value::as_u64).unwrap_or(0);
@@ -376,12 +383,18 @@ impl DeepSearchApp {
                     );
                     self.check_status();
                 }
-                UiMessage::Search(search) => {
-                    self.total = search.total;
-                    self.results = search.results;
+                UiMessage::SearchProgress { batch, loaded, total } => {
+                    self.total = total;
+                    self.results.extend(batch);
+                    self.message = format!("Retrieving results · {loaded} of {total} loaded");
+                }
+                UiMessage::SearchFinished { total } => {
+                    self.busy = false;
+                    self.total = total;
                     self.message = format!("Complete · {} of {} results loaded", self.results.len(), self.total);
                 }
                 UiMessage::Error(error) => {
+                    self.busy = false;
                     self.message = format!("Error: {error}");
                 }
                 UiMessage::ServiceState { active, enabled, detail } => {
@@ -409,6 +422,7 @@ impl DeepSearchApp {
                     }
                 }
                 UiMessage::PickedPaths(paths) => {
+                    self.busy = false;
                     for path in paths {
                         if !self.roots.lines().any(|existing| existing.trim() == path) {
                             if !self.roots.is_empty() && !self.roots.ends_with('\n') {
