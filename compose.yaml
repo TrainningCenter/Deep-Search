@@ -1,0 +1,28 @@
+services:
+  deep-search:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: deep-search:alpha
+    container_name: deep-search
+    restart: unless-stopped
+    init: true
+    ports:
+      # Keep the unauthenticated service private to this machine.
+      - "127.0.0.1:4765:4765"
+    volumes:
+      - deep-search-data:/data
+      # Put local folders or mounted NAS shares in ./scan.
+      # You can replace this with e.g. /mnt/nas:/scan:ro.
+      - ./scan:/scan:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+
+volumes:
+  deep-search-data:
