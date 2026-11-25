@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::time::{Duration, Instant};
 use tray_icon::{menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem}, Icon as TrayIconImage, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 enum UiMessage {
@@ -22,6 +23,7 @@ enum UiMessage {
     IndexError(String),
     TrayMenu(String),
     PickedPaths(Vec<String>),
+    NasState(Vec<(String, bool)>),
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -58,6 +60,10 @@ struct UiSettings {
     notify_on_errors: bool,
     #[serde(default = "default_disabled")]
     notify_on_service_state: bool,
+    #[serde(default)]
+    nas_roots: String,
+    #[serde(default = "default_disabled")]
+    notify_on_nas_state: bool,
 }
 
 impl Default for UiSettings {
@@ -70,6 +76,8 @@ impl Default for UiSettings {
             notify_on_completion: false,
             notify_on_errors: true,
             notify_on_service_state: false,
+            nas_roots: String::new(),
+            notify_on_nas_state: false,
         }
     }
 }
@@ -193,6 +201,9 @@ struct DeepSearchApp {
     tray_event_handler_started: bool,
     exit_requested: bool,
     settings_window_open: bool,
+    nas_status: BTreeMap<String, bool>,
+    nas_check_in_progress: bool,
+    nas_last_check: Option<Instant>,
 }
 
 impl Default for DeepSearchApp {
@@ -230,6 +241,9 @@ impl Default for DeepSearchApp {
             tray_event_handler_started: false,
             exit_requested: false,
             settings_window_open: false,
+            nas_status: BTreeMap::new(),
+            nas_check_in_progress: false,
+            nas_last_check: None,
         }
     }
 }
@@ -631,6 +645,21 @@ impl DeepSearchApp {
                         _ => {}
                     }
                 }
+                UiMessage::NasState(states) => {
+                    self.nas_check_in_progress = false;
+                    for (path, available) in states {
+                        if let Some(previous) = self.nas_status.insert(path.clone(), available) {
+                            if previous != available && self.settings.notify_on_nas_state {
+                                let (summary, body) = if available {
+                                    ("NAS location reconnected", format!("The network location is available again: {path}"))
+                                } else {
+                                    ("NAS location disconnected", format!("The network location is unavailable: {path}"))
+                                };
+                                show_notification(summary, &body);
+                            }
+                        }
+                    }
+                }
                 UiMessage::PickedPaths(paths) => {
                     self.busy = false;
                     for path in paths {
@@ -905,6 +934,26 @@ impl eframe::App for DeepSearchApp {
             self.service_checked = true;
             self.check_system_service();
         }
+        let nas_roots = self.settings.nas_roots.lines()
+            .map(str::trim).filter(|path| !path.is_empty())
+            .map(str::to_owned).collect::<Vec<_>>();
+        let nas_poll_due = self.nas_last_check
+            .map(|last| last.elapsed() >= Duration::from_secs(15))
+            .unwrap_or(true);
+        if !nas_roots.is_empty() && nas_poll_due && !self.nas_check_in_progress {
+            self.nas_check_in_progress = true;
+            self.nas_last_check = Some(Instant::now());
+            let sender = self.sender.clone();
+            thread::spawn(move || {
+                let states = nas_roots.into_iter()
+                    .map(|path| {
+                        let available = nas_path_available(&path);
+                        (path, available)
+                    })
+                    .collect();
+                let _ = sender.send(UiMessage::NasState(states));
+            });
+        }
         let dropped_files = ctx.input(|input| input.raw.dropped_files.clone());
         for dropped in dropped_files {
             if let Some(path) = dropped.path {
@@ -1077,6 +1126,23 @@ impl eframe::App for DeepSearchApp {
                         let notify_complete_changed = ui.checkbox(&mut self.settings.notify_on_completion, display_text(if self.arabic { "إشعار عند اكتمال الفهرسة" } else { "Notify when indexing completes" })).changed();
                         let notify_errors_changed = ui.checkbox(&mut self.settings.notify_on_errors, display_text(if self.arabic { "إشعار عند حدوث أخطاء" } else { "Notify when errors occur" })).changed();
                         let notify_service_changed = ui.checkbox(&mut self.settings.notify_on_service_state, display_text(if self.arabic { "إشعار عند تشغيل أو إيقاف الخدمة" } else { "Notify when service starts or stops" })).changed();
+                        ui.separator();
+                        ui.heading(display_text(if self.arabic { "مراقبة مواقع NAS" } else { "NAS location monitoring" }));
+                        ui.label(display_text(if self.arabic {
+                            "أدخل مسار كل مشاركة شبكة في سطر منفصل. تتم مراجعة الاتصال كل 15 ثانية."
+                        } else {
+                            "Enter each mounted network share on a separate line. Availability is checked every 15 seconds."
+                        }));
+                        let nas_roots_changed = ui.add(
+                            egui::TextEdit::multiline(&mut self.settings.nas_roots)
+                                .desired_rows(3)
+                                .desired_width(f32::INFINITY)
+                                .hint_text(display_text("/mnt/nas\\n\\\\server\\share")),
+                        ).changed();
+                        let notify_nas_changed = ui.checkbox(
+                            &mut self.settings.notify_on_nas_state,
+                            display_text(if self.arabic { "إشعار عند انقطاع NAS أو عودة الاتصال" } else { "Notify when NAS disconnects or reconnects" }),
+                        ).changed();
                         if tray_changed && tray_before != self.settings.tray_enabled {
                             if self.settings.tray_enabled {
                                 self.tray_checked = false;
@@ -1085,7 +1151,7 @@ impl eframe::App for DeepSearchApp {
                                 self.tray_checked = true;
                             }
                         }
-                        if tray_changed || close_changed || notify_complete_changed || notify_errors_changed || notify_service_changed {
+                        if tray_changed || close_changed || notify_complete_changed || notify_errors_changed || notify_service_changed || nas_roots_changed || notify_nas_changed {
                             self.persist_settings();
                         }
                         ui.separator();
@@ -1120,7 +1186,7 @@ impl eframe::App for DeepSearchApp {
             );
         });
 
-        if self.busy || self.tray_icon.is_some() {
+        if self.busy || self.tray_icon.is_some() || !self.settings.nas_roots.trim().is_empty() {
             ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }
     }
@@ -1610,6 +1676,7 @@ mod rtl_text_tests {
         assert!(settings.notify_on_errors);
         assert!(!settings.notify_on_completion);
         assert!(!settings.notify_on_service_state);
+        assert!(!settings.notify_on_nas_state);
     }
 
     #[test]
