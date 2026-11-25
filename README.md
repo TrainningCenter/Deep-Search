@@ -105,6 +105,34 @@ The service currently supports `status`, `index`, `search` (up to 100 results), 
 
 **Security and lifecycle:** this first service milestone is loopback-only by default and has no authentication, TLS, remote/NAS transport, OS service registration, boot startup, or tray integration yet. Do not expose it to a network or bind it to a non-loopback address on an untrusted network. OS-managed startup and permissions are planned as a separate milestone.
 
+### Linux system service (systemd)
+
+A system-wide systemd unit can start the engine at boot, before the selected user logs in, while running the process under that user's own Linux account (not root). Each user gets a separate database at `~/.local/share/deep-search/index.sqlite`.
+
+Build the release binary, then install and enable the service for the intended account:
+
+```bash
+cargo build --release
+sudo packaging/linux/systemd/install-service.sh "$USER" ./target/release/deep-search
+```
+
+Check or control the service:
+
+```bash
+systemctl status "deep-search@$USER.service"
+sudo systemctl stop "deep-search@$USER.service"
+sudo systemctl start "deep-search@$USER.service"
+sudo systemctl disable --now "deep-search@$USER.service"
+```
+
+To uninstall only that user's service instance (the index database is preserved):
+
+```bash
+sudo packaging/linux/systemd/uninstall-service.sh "$USER"
+```
+
+The installer requires systemd, root privileges, an existing non-root Linux account, and a compiled executable. The service inherits that account's filesystem permissions; it can index only locations that account can read. The unit uses a restrictive umask and binds the engine to loopback by default. The Settings UI toggle for automatic startup, and equivalent Windows/macOS installers, are not implemented yet.
+
 ## Query language
 
 | Condition | Meaning | Example |
