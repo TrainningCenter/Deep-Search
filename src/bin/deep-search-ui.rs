@@ -641,6 +641,39 @@ fn format_modified(timestamp_ns: u64) -> String {
     format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02} UTC")
 }
 
+fn configure_arabic_font(ctx: &egui::Context) {
+    #[cfg(target_os = "windows")]
+    let candidates = [
+        r"C:\Windows\Fonts\arial.ttf",
+        r"C:\Windows\Fonts\tahoma.ttf",
+        r"C:\Windows\Fonts\segoeui.ttf",
+    ];
+    #[cfg(target_os = "macos")]
+    let candidates = [
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Tahoma.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    ];
+    #[cfg(target_os = "linux")]
+    let candidates = [
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    ];
+
+    let Some(bytes) = candidates.iter().find_map(|path| std::fs::read(path).ok()) else {
+        return;
+    };
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "deep_search_arabic_fallback".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+    );
+    fonts.families.entry(egui::FontFamily::Proportional)
+        .or_default().push("deep_search_arabic_fallback".to_owned());
+    ctx.set_fonts(fonts);
+}
+
 fn format_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut size = bytes as f64;
@@ -662,7 +695,8 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Deep-Search",
         options,
-        Box::new(|_creation_context| {
+        Box::new(|creation_context| {
+            configure_arabic_font(&creation_context.egui_ctx);
             let mut app = DeepSearchApp::default();
             app.check_status();
             Ok(Box::new(app))
