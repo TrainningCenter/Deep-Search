@@ -1139,7 +1139,7 @@ mod database_tests {
         assert!(db.search_content("old searchable").unwrap().is_empty());
         assert_eq!(db.search_content("new searchable").unwrap().len(), 1);
 
-        let root = std::path::PathBuf::from("/test");
+        let root = file.path.parent().unwrap().to_path_buf();
         let deleted = db.prune_missing_files(&[(root, true)], &[]).unwrap();
         assert_eq!(deleted, 1);
         assert!(db.search_content("new searchable").unwrap().is_empty());
