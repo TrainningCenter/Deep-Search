@@ -19,6 +19,7 @@ enum UiMessage {
     ServiceAction { action: String, success: bool, detail: String },
     ServiceLogoutSetting { enabled: bool, success: bool, detail: String },
     IndexingPause { paused: bool, success: bool, detail: String },
+    IndexError(String),
     TrayMenu(String),
     PickedPaths(Vec<String>),
 }
@@ -50,6 +51,12 @@ struct UiSettings {
     tray_enabled: bool,
     #[serde(default = "default_enabled")]
     close_to_tray: bool,
+    #[serde(default = "default_enabled")]
+    notify_on_completion: bool,
+    #[serde(default = "default_enabled")]
+    notify_on_errors: bool,
+    #[serde(default = "default_enabled")]
+    notify_on_service_state: bool,
 }
 
 impl Default for UiSettings {
@@ -59,6 +66,9 @@ impl Default for UiSettings {
             active_profile: String::new(),
             tray_enabled: true,
             close_to_tray: true,
+            notify_on_completion: true,
+            notify_on_errors: true,
+            notify_on_service_state: true,
         }
     }
 }
@@ -462,7 +472,7 @@ impl DeepSearchApp {
         self.message = format!("Indexing {} location(s)…", paths.len());
         thread::spawn(move || {
             let result = client.index(&paths).map(UiMessage::Indexed)
-                .unwrap_or_else(|error| UiMessage::Error(error.to_string()));
+                .unwrap_or_else(|error| UiMessage::IndexError(error.to_string()));
             let _ = sender.send(result);
         });
     }
@@ -516,6 +526,17 @@ impl DeepSearchApp {
                     self.message = format!(
                         "Indexing finished · {saved} saved · {discovered} discovered · {errors} errors"
                     );
+                    if errors > 0 && self.settings.notify_on_errors {
+                        show_notification(
+                            "Indexing finished with errors",
+                            &format!("{errors} error(s) while indexing {discovered} file(s)."),
+                        );
+                    } else if errors == 0 && self.settings.notify_on_completion {
+                        show_notification(
+                            "Indexing completed",
+                            &format!("{saved} file(s) indexed successfully."),
+                        );
+                    }
                     self.check_status();
                 }
                 UiMessage::SearchProgress { batch, loaded, total } => {
@@ -528,15 +549,29 @@ impl DeepSearchApp {
                     self.total = total;
                     self.message = format!("Complete · {} of {} results loaded", self.results.len(), self.total);
                 }
+                UiMessage::IndexError(error) => {
+                    self.busy = false;
+                    self.message = format!("Indexing failed: {error}");
+                    if self.settings.notify_on_errors {
+                        show_notification("Indexing failed", &error);
+                    }
+                }
                 UiMessage::Error(error) => {
                     self.busy = false;
                     self.message = format!("Error: {error}");
                 }
                 UiMessage::ServiceState { active, enabled, detail } => {
+                    let state_changed = self.service_active.is_some()
+                        && active.is_some()
+                        && self.service_active != active;
                     self.service_active = active;
                     self.service_enabled = enabled;
                     self.service_detail = detail;
                     self.service_busy = false;
+                    if state_changed && self.settings.notify_on_service_state {
+                        let state = if active == Some(true) { "started" } else { "stopped" };
+                        show_notification("Deep-Search background service", &format!("Service {state}."));
+                    }
                 }
                 UiMessage::ServiceAction { action, success, detail } => {
                     self.service_detail = if success {
@@ -545,7 +580,11 @@ impl DeepSearchApp {
                         format!("{action} failed: {detail}")
                     };
                     self.service_busy = false;
-                    if success { self.check_system_service(); }
+                    if success {
+                        self.check_system_service();
+                    } else if self.settings.notify_on_errors {
+                        show_notification("Deep-Search service error", &detail);
+                    }
                 }
                 UiMessage::ServiceLogoutSetting { enabled, success, detail } => {
                     self.service_busy = false;
@@ -1031,6 +1070,9 @@ impl eframe::App for DeepSearchApp {
                         let tray_before = self.settings.tray_enabled;
                         let tray_changed = ui.checkbox(&mut self.settings.tray_enabled, if self.arabic { "إظهار أيقونة شريط النظام" } else { "Show system tray icon" }).changed();
                         let close_changed = ui.checkbox(&mut self.settings.close_to_tray, if self.arabic { "إخفاء النافذة عند الإغلاق" } else { "Close window to tray" }).changed();
+                        let notify_complete_changed = ui.checkbox(&mut self.settings.notify_on_completion, if self.arabic { "إشعار عند اكتمال الفهرسة" } else { "Notify when indexing completes" }).changed();
+                        let notify_errors_changed = ui.checkbox(&mut self.settings.notify_on_errors, if self.arabic { "إشعار عند حدوث أخطاء" } else { "Notify when errors occur" }).changed();
+                        let notify_service_changed = ui.checkbox(&mut self.settings.notify_on_service_state, if self.arabic { "إشعار عند تشغيل أو إيقاف الخدمة" } else { "Notify when service starts or stops" }).changed();
                         if tray_changed && tray_before != self.settings.tray_enabled {
                             if self.settings.tray_enabled {
                                 self.tray_checked = false;
@@ -1039,7 +1081,7 @@ impl eframe::App for DeepSearchApp {
                                 self.tray_checked = true;
                             }
                         }
-                        if tray_changed || close_changed {
+                        if tray_changed || close_changed || notify_complete_changed || notify_errors_changed || notify_service_changed {
                             self.persist_settings();
                         }
                         ui.separator();
@@ -1385,6 +1427,20 @@ fn configure_arabic_font(ctx: &egui::Context) {
     fonts.families.entry(egui::FontFamily::Proportional)
         .or_default().push("deep_search_arabic_fallback".to_owned());
     ctx.set_fonts(fonts);
+}
+
+fn show_notification(summary: &str, body: &str) {
+    let summary = summary.to_owned();
+    let body = body.to_owned();
+    thread::spawn(move || {
+        if let Err(error) = notify_rust::Notification::new()
+            .summary(&summary)
+            .body(&body)
+            .show()
+        {
+            eprintln!("Could not show desktop notification: {error}");
+        }
+    });
 }
 
 fn create_tray_icon_image() -> Result<TrayIconImage, tray_icon::BadIcon> {
