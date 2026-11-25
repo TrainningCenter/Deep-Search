@@ -1,6 +1,6 @@
 use deep_search::client::{CompleteSearch, ServiceClient};
 use eframe::egui;
-use egui_extras::{Column, TableBuilder};
+use egui_table::{AutoSizeMode, CellInfo, Column as TableColumn, HeaderCellInfo, HeaderRow, Table, TableDelegate, TableState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -29,7 +29,11 @@ struct ColumnSetting {
 struct ViewProfile {
     columns: Vec<ColumnSetting>,
     row_height: f32,
+    #[serde(default = "default_frozen_columns")]
+    frozen_columns: usize,
 }
+
+fn default_frozen_columns() -> usize { 1 }
 
 #[derive(Default, Serialize, Deserialize)]
 struct UiSettings {
@@ -52,7 +56,7 @@ fn default_profile(columns: &[&str]) -> ViewProfile {
     for column in &mut settings {
         column.visible = columns.contains(&column.key.as_str());
     }
-    ViewProfile { columns: settings, row_height: 25.0 }
+    ViewProfile { columns: settings, row_height: 25.0, frozen_columns: 1 }
 }
 
 fn settings_path() -> PathBuf {
@@ -124,6 +128,7 @@ struct DeepSearchApp {
     service_busy: bool,
     service_checked: bool,
     dragged_column: Option<usize>,
+    reset_table_layout: bool,
 }
 
 impl Default for DeepSearchApp {
@@ -152,6 +157,7 @@ impl Default for DeepSearchApp {
             service_busy: false,
             service_checked: false,
             dragged_column: None,
+            reset_table_layout: false,
         }
     }
 }
