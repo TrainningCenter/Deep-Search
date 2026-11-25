@@ -103,6 +103,26 @@ Available request examples (send each as a single line):
 
 The service currently supports `status`, `index`, `search`, and `content`. Search accepts optional `limit` (1–1000 results per transport batch, default 100), `offset` (default 0), `sort` (`relevance`, `name`, `path`, `extension`, `size`, or `modified`), and `order` (`asc` or `desc`). **There is no maximum total number of search matches:** clients retrieve subsequent batches by increasing `offset` until `has_more` is false. The desktop interface will combine those batches into one continuous results table; users will not navigate pages or lose results because of the batch size. The response includes `results`, `total`, `limit`, `offset`, and `has_more`. Responses contain `ok: true` and a `data` object on success, or `ok: false` and an `error` string on failure.
 
+Rust applications can use the built-in service client to retrieve the complete result set without managing offsets themselves:
+
+```rust
+use deep_search::client::ServiceClient;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = ServiceClient::new("127.0.0.1:4765");
+    let search = client.search_all("type:video", "size", "desc")?;
+
+    println!("Retrieved {} of {} matches", search.results.len(), search.total);
+    for file in search.results {
+        println!("{}", file["path"].as_str().unwrap_or_default());
+    }
+    Ok(())
+}
+```
+
+`search_all` automatically requests each batch, appends it to one collection, checks that the total remains consistent, and reports incomplete responses instead of silently dropping results.
+
+
 **Security and lifecycle:** the service is loopback-only by default and has no authentication, TLS, or remote/NAS transport. Do not expose it to an untrusted network. Linux systemd boot startup is available; tray integration and Windows/macOS service installers remain future work.
 
 ### Linux system service (systemd)
