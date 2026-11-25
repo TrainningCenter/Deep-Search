@@ -715,6 +715,7 @@ mod tests {
         assert_eq!(response["ok"], true);
         assert_eq!(response["data"]["indexed_files"], 0);
         assert_eq!(response["data"]["stop_on_logout"], false);
+        assert!(response["data"]["logout_detection_available"].is_boolean());
         assert_eq!(response["data"]["version"], crate::VERSION);
 
         let updated = handle_request(
