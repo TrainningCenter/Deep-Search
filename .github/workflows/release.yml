@@ -22,16 +22,19 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             binary: deep-search
+            ui_binary: deep-search-ui
             archive: tar.gz
           - platform: windows-x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             binary: deep-search.exe
+            ui_binary: deep-search-ui.exe
             archive: zip
           - platform: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
             binary: deep-search
+            ui_binary: deep-search-ui
             archive: tar.gz
 
     runs-on: ${{ matrix.os }}
@@ -45,11 +48,17 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install Linux desktop build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgl1-mesa-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-cursor-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
+
       - name: Run tests
         run: cargo test --all-targets
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --features desktop --bins --target ${{ matrix.target }}
 
       - name: Package Linux and macOS binary
         if: runner.os != 'Windows'
@@ -57,6 +66,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
+          cp target/${{ matrix.target }}/release/${{ matrix.ui_binary }} dist/
           cp README.md dist/
           if [ "${{ runner.os }}" = "Linux" ]; then
             mkdir -p dist/packaging/linux
@@ -70,6 +80,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" dist/
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.ui_binary }}" dist/
           Copy-Item README.md dist/
           Compress-Archive -Path dist/* -DestinationPath "deep-search-${{ matrix.platform }}.zip"
 
