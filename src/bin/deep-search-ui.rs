@@ -295,11 +295,16 @@ impl DeepSearchApp {
             changed |= ui.add(egui::Slider::new(row_height, 18.0..=60.0).suffix(" px")).changed();
         });
         if ui.button(if self.arabic { "ملاءمة تلقائية للأعمدة" } else { "Auto-fit columns" }).clicked() {
+            let widths = self.active_profile().columns.iter().map(|column| {
+                let header_width = column_label(&column.key, arabic).chars().count();
+                let content_width = self.results.iter().take(500)
+                    .map(|result| result_column_text(result, &column.key).chars().count())
+                    .max().unwrap_or(0);
+                let width = (header_width.max(content_width) as f32 * 8.0 + 28.0).clamp(60.0, 1000.0);
+                (column.key.clone(), width)
+            }).collect::<BTreeMap<_, _>>();
             for column in &mut self.active_profile_mut().columns {
-                column.width = match column.key.as_str() {
-                    "name" => 260.0, "extension" => 100.0, "size" => 120.0,
-                    "modified" => 180.0, "path" => 520.0, _ => 160.0,
-                };
+                if let Some(width) = widths.get(&column.key) { column.width = *width; }
             }
             changed = true;
         }
@@ -335,22 +340,8 @@ impl DeepSearchApp {
                 let result = &self.results[row.index()];
                 for column in &columns {
                     row.col(|ui| {
-                        match column.key.as_str() {
-                            "name" | "extension" | "path" => {
-                                let value = result.get(&column.key).and_then(Value::as_str).unwrap_or("—");
-                                ui.add(egui::Label::new(value).truncate());
-                            }
-                            "modified" => {
-                                let value = result.get("modified_timestamp_ns").and_then(Value::as_u64)
-                                    .map(format_modified).unwrap_or_else(|| "—".to_owned());
-                                ui.label(value);
-                            }
-                            "size" => {
-                                let size = result.get("size_bytes").and_then(Value::as_u64).unwrap_or(0);
-                                ui.label(format_size(size));
-                            }
-                            _ => { ui.label("—"); }
-                        }
+                        let value = result_column_text(result, &column.key);
+                        ui.add(egui::Label::new(value).truncate());
                     });
                 }
             });
@@ -460,6 +451,17 @@ impl eframe::App for DeepSearchApp {
         });
 
         if self.busy { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
+    }
+}
+
+fn result_column_text(result: &Value, key: &str) -> String {
+    match key {
+        "name" | "extension" | "path" => result.get(key).and_then(Value::as_str)
+            .unwrap_or("—").to_owned(),
+        "modified" => result.get("modified_timestamp_ns").and_then(Value::as_u64)
+            .map(format_modified).unwrap_or_else(|| "—".to_owned()),
+        "size" => format_size(result.get("size_bytes").and_then(Value::as_u64).unwrap_or(0)),
+        _ => "—".to_owned(),
     }
 }
 
