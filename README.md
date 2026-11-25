@@ -58,7 +58,7 @@ docker compose logs -f
 docker compose down
 ```
 
-The service has no authentication/TLS layer yet, so the sample deliberately does not expose port 4765 to other machines. Remote service access must wait for the secured transport implementation.
+The service has no authentication/TLS layer yet and now enforces loopback-only binding, rejecting non-loopback addresses even when explicitly requested. Remote service access must wait for the secured transport implementation.
 
 # Desktop application (alpha)
 
@@ -176,11 +176,13 @@ Start it:
 deep-search serve index.sqlite
 ```
 
-You can override the bind address explicitly:
+You can override the loopback bind address explicitly:
 
 ```bash
 deep-search serve index.sqlite 127.0.0.1:4765
 ```
+
+The service rejects non-loopback bind addresses (including `0.0.0.0` and `[::]`) while its protocol has no authentication or encryption. This is enforced by the service itself, not only by the sample configuration. Remote access will be enabled only after an authenticated and encrypted transport is implemented.
 
 Available request examples (send each as a single line):
 
