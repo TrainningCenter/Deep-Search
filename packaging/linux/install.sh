@@ -45,7 +45,7 @@ done
 install -D -m 0755 "$desktop_app" /usr/local/bin/deep-search-ui
 install -D -m 0644 "$script_dir/deep-search.desktop" /usr/share/applications/deep-search.desktop
 
-"$systemd_dir/install-service.sh" "$username" "$engine"
+bash "$systemd_dir/install-service.sh" "$username" "$engine"
 
 echo
 echo "Deep-Search desktop application and background service are installed."
