@@ -4,7 +4,7 @@ use crate::query::parse_query;
 use serde_json::{json, Value};
 use std::error::Error;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -32,7 +32,7 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
         Arc::clone(&index_lock),
         Arc::clone(&indexing_paused),
     );
-    let listener = TcpListener::bind(address)?;
+    let listener = bind_loopback_listener(address)?;
     listener.set_nonblocking(true)?;
     eprintln!("Deep-Search service listening on {address}");
 
@@ -83,6 +83,21 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
         }
     }
     Ok(())
+}
+
+/// Bind the unauthenticated JSON-line service only to loopback interfaces.
+/// Remote access must use a separately authenticated and encrypted transport.
+fn bind_loopback_listener(address: &str) -> Result<TcpListener, Box<dyn Error>> {
+    let resolved = address.to_socket_addrs()?.collect::<Vec<_>>();
+    if resolved.is_empty() {
+        return Err("Service bind address did not resolve to any socket addresses".into());
+    }
+    if resolved.iter().any(|socket| !socket.ip().is_loopback()) {
+        return Err(
+            "Refusing to expose the unauthenticated service on a non-loopback interface; remote access requires secured transport".into(),
+        );
+    }
+    Ok(TcpListener::bind(address)?)
 }
 
 fn spawn_logout_monitor(database_path: PathBuf, shutdown: mpsc::Sender<()>) {
@@ -597,6 +612,20 @@ mod logout_monitor_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn service_bind_rejects_non_loopback_interfaces() {
+        for address in ["0.0.0.0:4765", "[::]:4765", "192.0.2.10:4765"] {
+            let error = bind_loopback_listener(address).unwrap_err();
+            assert!(error.to_string().contains("non-loopback interface"));
+        }
+    }
+
+    #[test]
+    fn service_bind_accepts_ipv4_loopback() {
+        let listener = bind_loopback_listener("127.0.0.1:0").unwrap();
+        assert!(listener.local_addr().unwrap().ip().is_loopback());
+    }
 
     #[test]
     fn request_lines_are_bounded_and_terminated() {
