@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Deep-Search
+GenericName=File Search
+Comment=Fast file indexing and search
+Exec=/usr/local/bin/deep-search-ui
+TryExec=/usr/local/bin/deep-search-ui
+Icon=system-search
+Terminal=false
+Categories=Utility;System;FileTools;
+Keywords=search;files;index;documents;videos;
+StartupNotify=true
