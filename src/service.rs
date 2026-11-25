@@ -31,13 +31,21 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
         Arc::clone(&index_lock),
     );
     let listener = TcpListener::bind(address)?;
+    listener.set_nonblocking(true)?;
     eprintln!("Deep-Search service listening on {address}");
+
+    let (shutdown_sender, shutdown_receiver) = mpsc::channel();
+    spawn_logout_monitor(watcher_database_path.clone(), shutdown_sender);
 
     // Each client gets its own SQLite connection. WAL allows readers to query
     // while the indexing worker commits batches; writes remain serialized.
-    for incoming in listener.incoming() {
-        match incoming {
-            Ok(stream) => {
+    loop {
+        if shutdown_receiver.try_recv().is_ok() {
+            eprintln!("Deep-Search service stopping after user logout.");
+            break;
+        }
+        match listener.accept() {
+            Ok((stream, _)) => {
                 let database_path = watcher_database_path.clone();
                 let watch_roots = watch_roots.clone();
                 let index_lock = Arc::clone(&index_lock);
@@ -56,10 +64,105 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
                     }
                 });
             }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(100));
+            }
             Err(error) => eprintln!("Incoming connection failed: {error}"),
         }
     }
     Ok(())
+}
+
+fn spawn_logout_monitor(database_path: PathBuf, shutdown: mpsc::Sender<()>) {
+    thread::spawn(move || {
+        let engine = match SearchEngine::connect_existing(&database_path) {
+            Ok(engine) => engine,
+            Err(error) => {
+                eprintln!("Logout monitor could not open the service database: {error}");
+                return;
+            }
+        };
+        let mut session_seen = false;
+        let mut consecutive_empty_checks = 0_u8;
+
+        loop {
+            match engine.stop_on_logout() {
+                Ok(false) => {
+                    session_seen = false;
+                    consecutive_empty_checks = 0;
+                }
+                Ok(true) => match current_user_session_state() {
+                    Some(true) => {
+                        session_seen = true;
+                        consecutive_empty_checks = 0;
+                    }
+                    Some(false) if session_seen => {
+                        consecutive_empty_checks = consecutive_empty_checks.saturating_add(1);
+                        if consecutive_empty_checks >= 2 {
+                            let _ = shutdown.send(());
+                            break;
+                        }
+                    }
+                    Some(false) => consecutive_empty_checks = 0,
+                    None => consecutive_empty_checks = 0,
+                },
+                Err(error) => eprintln!("Could not read logout preference: {error}"),
+            }
+            thread::sleep(Duration::from_secs(5));
+        }
+    });
+}
+
+/// Returns Some(true/false) when the current account's interactive sessions can
+/// be queried. None means the platform session query is unavailable; in that
+/// case the service stays running rather than stopping unexpectedly.
+fn current_user_session_state() -> Option<bool> {
+    use std::process::Command;
+
+    #[cfg(target_os = "linux")]
+    {
+        let username = std::env::var("USER")
+            .or_else(|_| std::env::var("LOGNAME")).ok()?;
+        let output = Command::new("loginctl")
+            .args(["show-user", &username, "--property=Sessions", "--value"])
+            .output().ok()?;
+        if !output.status.success() { return None; }
+        return Some(!String::from_utf8_lossy(&output.stdout).trim().is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let username = std::env::var("USER").ok()?;
+        let output = Command::new("who").output().ok()?;
+        if !output.status.success() { return None; }
+        return Some(String::from_utf8_lossy(&output.stdout).lines().any(|line| {
+            line.split_whitespace().next() == Some(username.as_str())
+        }));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let username = std::env::var("USERNAME").ok()?;
+        let output = Command::new("query").arg("user").output().ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if !output.status.success() {
+            return if stdout.trim().is_empty() || stdout.contains("No User exists") {
+                Some(false)
+            } else {
+                None
+            };
+        }
+        return Some(stdout.lines().skip(1).any(|line| {
+            let session_user = line.split_whitespace().next().unwrap_or("").trim_start_matches('>');
+            session_user.rsplit('\\').next().unwrap_or(session_user)
+                .eq_ignore_ascii_case(&username)
+        }));
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        None
+    }
 }
 
 fn handle_connection(
@@ -296,8 +399,15 @@ fn handle_request_with_context(
         match command {
             "status" => Ok(json!({
                 "indexed_files": engine.indexed_file_count()?,
+                "stop_on_logout": engine.stop_on_logout()?,
                 "version": crate::VERSION
             })),
+            "set_stop_on_logout" => {
+                let enabled = request.get("enabled").and_then(Value::as_bool)
+                    .ok_or("Missing boolean field: enabled")?;
+                engine.set_stop_on_logout(enabled)?;
+                Ok(json!({"stop_on_logout": enabled}))
+            },
             "index" => {
                 let paths = request.get("paths").and_then(Value::as_array)
                     .ok_or("Missing array field: paths")?;
