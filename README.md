@@ -15,12 +15,11 @@ Open the [latest Deep-Search Alpha Release](https://github.com/TrainningCenter/D
 
 Each package has a matching `.sha256` file. Verify downloads before installation:
 
-## Maintainers: enable automatic GitHub Releases
+## Maintainers: automatic GitHub Releases
 
-The release workflow needs a token that is allowed to create releases. In this repository, the default GitHub Actions integration token is rejected by GitHub with HTTP 403 even though the workflow has `contents: write`.
+The release workflow publishes a new alpha release after the Linux, Windows, macOS, and Docker packages have all built and passed package verification. It uses the workflow's built-in `GITHUB_TOKEN`, with `contents: write` permission scoped to the publishing job. No personal access token or repository secret is required for the current workflow.
 
-Create a fine-grained personal access token restricted to this repository with **Contents: Read and write** permission, then add it under **Repository Settings → Secrets and variables → Actions → New repository secret** using the exact name `DEEP_SEARCH_RELEASE_TOKEN`. Do not put the token in source code or commit it. The workflow checks for this secret before publishing and uses it only for release creation and asset uploads.
-
+If release publishing is denied after changing repository or organization Actions policies, check that the workflow is allowed to write repository contents and create releases. Never commit a personal access token or other secret to the repository.
 
 - Linux/macOS: `sha256sum -c deep-search-<platform>.sha256`
 - Windows PowerShell: compare `(Get-FileHash .\\deep-search-windows-x64.zip -Algorithm SHA256).Hash.ToLower()` with the hash in `deep-search-windows-x64.sha256`.
