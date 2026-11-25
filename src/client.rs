@@ -36,6 +36,10 @@ impl ServiceClient {
         self.request(json!({"command": "status"}))
     }
 
+    pub fn set_stop_on_logout(&self, enabled: bool) -> Result<Value, Box<dyn Error>> {
+        self.request(json!({"command": "set_stop_on_logout", "enabled": enabled}))
+    }
+
     pub fn index(&self, paths: &[String]) -> Result<Value, Box<dyn Error>> {
         self.request(json!({"command": "index", "paths": paths}))
     }
