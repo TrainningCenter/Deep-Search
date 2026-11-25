@@ -128,6 +128,7 @@ fn parse_ffprobe_json(bytes: &[u8]) -> Option<MediaMetadata> {
         || metadata.width.is_some()
         || metadata.height.is_some()
         || metadata.video_codec.is_some()
+        || metadata.frame_rate_milli.is_some()
         || metadata.audio_codec.is_some()
         || metadata.container.is_some()
         || metadata.bit_rate.is_some()
@@ -195,6 +196,13 @@ mod tests {
         assert!(!is_supported_media_extension(Some("m2ts")));
         assert!(!is_supported_media_extension(Some("mxf")));
         assert!(!is_supported_media_extension(Some("txt")));
+    }
+
+    #[test]
+    fn keeps_metadata_when_only_frame_rate_is_available() {
+        let json = br#"{"streams":[{"codec_type":"video","r_frame_rate":"24/1"}]}"#;
+        let metadata = parse_ffprobe_json(json).unwrap();
+        assert_eq!(metadata.frame_rate_milli, Some(24_000));
     }
 
     #[test]
