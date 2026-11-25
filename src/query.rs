@@ -116,7 +116,14 @@ fn parse_condition(token: &str) -> Result<SearchExpression, String> {
     }
     if lower.starts_with("size>=") { return Ok(SearchExpression::SizeAtLeast(parse_size(&token[6..])?)); }
     if lower.starts_with("size<=") { return Ok(SearchExpression::SizeAtMost(parse_size(&token[6..])?)); }
-    Err(format!("Unknown condition '{token}'. Use name:, path:, content:, ext:, type:, size>= or size<="))
+    if token.contains(':') || lower.starts_with("size>") || lower.starts_with("size<") {
+        return Err(format!("Unknown condition '{token}'. Use name:, path:, content:, ext:, type:, size>= or size<="));
+    }
+    Ok(SearchExpression::Or(vec![
+        SearchExpression::NameContains(token.to_string()),
+        SearchExpression::PathContains(token.to_string()),
+        SearchExpression::ContentContains(token.to_string()),
+    ]))
 }
 
 fn parse_size(value: &str) -> Result<u64, String> {
@@ -186,6 +193,33 @@ mod tests {
         );
         assert!(parse_query("type:camera").is_err());
         assert!(parse_query("type:").is_err());
+    }
+
+    #[test]
+    fn parses_bare_terms_across_name_path_and_content() {
+        assert_eq!(
+            parse_query("docker").unwrap(),
+            SearchExpression::Or(vec![
+                SearchExpression::NameContains("docker".into()),
+                SearchExpression::PathContains("docker".into()),
+                SearchExpression::ContentContains("docker".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn parses_bare_phrases_with_field_filters() {
+        assert_eq!(
+            parse_query(r#""holiday video" AND ext:mkv"#).unwrap(),
+            SearchExpression::And(vec![
+                SearchExpression::Or(vec![
+                    SearchExpression::NameContains("holiday video".into()),
+                    SearchExpression::PathContains("holiday video".into()),
+                    SearchExpression::ContentContains("holiday video".into()),
+                ]),
+                SearchExpression::ExtensionEquals("mkv".into()),
+            ])
+        );
     }
 
     #[test]
