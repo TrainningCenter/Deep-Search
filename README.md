@@ -103,7 +103,7 @@ Available request examples (send each as a single line):
 
 The service currently supports `status`, `index`, `search` (up to 100 results), and `content`. Responses contain `ok: true` and a `data` object on success, or `ok: false` and an `error` string on failure.
 
-**Security and lifecycle:** this first service milestone is loopback-only by default and has no authentication, TLS, remote/NAS transport, OS service registration, boot startup, or tray integration yet. Do not expose it to a network or bind it to a non-loopback address on an untrusted network. OS-managed startup and permissions are planned as a separate milestone.
+**Security and lifecycle:** the service is loopback-only by default and has no authentication, TLS, or remote/NAS transport. Do not expose it to an untrusted network. Linux systemd boot startup is available; tray integration and Windows/macOS service installers remain future work.
 
 ### Linux system service (systemd)
 
@@ -116,14 +116,20 @@ cargo build --release
 sudo packaging/linux/systemd/install-service.sh "$USER" ./target/release/deep-search
 ```
 
-Check or control the service:
+Check or control the service with the installed helper:
 
 ```bash
-systemctl status "deep-search@$USER.service"
-sudo systemctl stop "deep-search@$USER.service"
-sudo systemctl start "deep-search@$USER.service"
-sudo systemctl disable --now "deep-search@$USER.service"
+deep-search-service status "$USER"
+deep-search-service is-active "$USER"
+deep-search-service is-enabled "$USER"
+sudo deep-search-service start "$USER"
+sudo deep-search-service stop "$USER"
+sudo deep-search-service restart "$USER"
+sudo deep-search-service enable "$USER"
+sudo deep-search-service disable "$USER"
 ```
+
+`enable` and `disable` control automatic startup at boot; they do not start or stop the running process. Use `start` or `stop` for runtime control. The helper validates the Linux account and refuses to manage a root-owned instance.
 
 To uninstall only that user's service instance (the index database is preserved):
 
@@ -149,6 +155,6 @@ Size units include `B`, `KB`/`KiB`, `MB`/`MiB`, `GB`/`GiB`, and `TB`/`TiB`. Bool
 
 ## Project direction
 
-The planned product separates the background indexing/search engine from its user interface and is intended to support Local, NAS, and Remote operating modes. The current repository is the engine foundation; the full desktop application and service-management layer are not yet implemented.
+The product separates the background indexing/search engine from its user interface and is intended to support Local, NAS, and Remote operating modes. The current repository contains the Rust engine, local JSON service, and an initial Linux systemd lifecycle controller; the desktop interface and cross-platform service managers are still under development.
 
 Linux is the first-priority platform, followed by Windows and macOS.
