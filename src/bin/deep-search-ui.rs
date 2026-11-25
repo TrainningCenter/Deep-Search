@@ -566,7 +566,7 @@ impl eframe::App for DeepSearchApp {
                 });
                 if self.service_busy { ui.spinner(); }
                 ui.label(&self.service_detail);
-                ui.small("Linux systemd only · authorization may be requested by the desktop");
+                ui.small(if self.arabic { "مدير خدمات النظام · قد يُطلب تأكيد الصلاحيات" } else { "Platform service manager · elevated authorization may be requested" });
             });
             ui.separator();
             ui.heading(if self.arabic { "بحث" } else { "Search" });
