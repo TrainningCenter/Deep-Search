@@ -165,19 +165,37 @@ mod tests {
     fn search_api_supports_pagination_and_sorting() {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let db_path = std::env::temp_dir().join(format!(
-            "deep-search-service-page-{}-{unique}.sqlite", std::process::id()
+        let base = std::env::temp_dir().join(format!(
+            "deep-search-service-page-{}-{unique}", std::process::id()
         ));
-        let engine = SearchEngine::open(&db_path).unwrap();
+        let root = base.join("files");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("report-small.txt"), b"small").unwrap();
+        std::fs::write(root.join("report-large.txt"), b"a larger report").unwrap();
+
+        let engine = SearchEngine::open(base.join("index.sqlite")).unwrap();
+        let indexed = engine.index_paths(&[root.as_path()]);
+        assert_eq!(indexed.errors, 0);
+        assert_eq!(indexed.files_saved, 2);
+
         let response = handle_request(
-            r#"{"command":"search","query":"name:report","limit":25,"offset":10,"sort":"size","order":"desc"}"#,
+            r#"{"command":"search","query":"name:report","limit":1,"offset":0,"sort":"size","order":"desc"}"#,
             &engine,
         );
         assert_eq!(response["ok"], true);
-        assert_eq!(response["data"]["limit"], 25);
-        assert_eq!(response["data"]["offset"], 10);
-        assert_eq!(response["data"]["total"], 0);
-        assert_eq!(response["data"]["has_more"], false);
+        assert_eq!(response["data"]["limit"], 1);
+        assert_eq!(response["data"]["offset"], 0);
+        assert_eq!(response["data"]["total"], 2);
+        assert_eq!(response["data"]["has_more"], true);
+        assert_eq!(response["data"]["results"].as_array().unwrap().len(), 1);
+        assert_eq!(response["data"]["results"][0]["name"], "report-large.txt");
+
+        let next_page = handle_request(
+            r#"{"command":"search","query":"name:report","limit":1,"offset":1,"sort":"size","order":"desc"}"#,
+            &engine,
+        );
+        assert_eq!(next_page["data"]["has_more"], false);
+        assert_eq!(next_page["data"]["results"][0]["name"], "report-small.txt");
 
         let invalid = handle_request(
             r#"{"command":"search","query":"name:report","limit":1001}"#,
@@ -187,7 +205,7 @@ mod tests {
         assert!(invalid["error"].as_str().unwrap().contains("between 1 and 1000"));
 
         drop(engine);
-        let _ = std::fs::remove_file(db_path);
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]
