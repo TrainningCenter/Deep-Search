@@ -363,8 +363,8 @@ impl eframe::App for DeepSearchApp {
             if let Some(path) = dropped.path {
                 let path = path.to_string_lossy().to_string();
                 if !self.roots.lines().any(|existing| existing.trim() == path) {
-                    if !self.roots.is_empty() && !self.roots.ends_with('\\n') {
-                        self.roots.push('\\n');
+                    if !self.roots.is_empty() && !self.roots.ends_with('\n') {
+                        self.roots.push('\n');
                     }
                     self.roots.push_str(&path);
                 }
