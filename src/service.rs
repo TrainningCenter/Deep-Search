@@ -209,6 +209,46 @@ mod tests {
     }
 
     #[test]
+    fn search_api_returns_all_matches_across_automatic_client_batches() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "deep-search-service-unbounded-{}-{unique}", std::process::id()
+        ));
+        let root = base.join("files");
+        std::fs::create_dir_all(&root).unwrap();
+        for index in 0..1005 {
+            std::fs::write(root.join(format!("report-{index:04}.txt")), b"report").unwrap();
+        }
+
+        let engine = SearchEngine::open(base.join("index.sqlite")).unwrap();
+        let indexed = engine.index_paths(&[root.as_path()]);
+        assert_eq!(indexed.errors, 0);
+        assert_eq!(indexed.files_saved, 1005);
+
+        let first_batch = handle_request(
+            r#"{\"command\":\"search\",\"query\":\"name:report\",\"limit\":1000,\"offset\":0}"#,
+            &engine,
+        );
+        assert_eq!(first_batch["ok"], true);
+        assert_eq!(first_batch["data"]["total"], 1005);
+        assert_eq!(first_batch["data"]["results"].as_array().unwrap().len(), 1000);
+        assert_eq!(first_batch["data"]["has_more"], true);
+
+        let second_batch = handle_request(
+            r#"{\"command\":\"search\",\"query\":\"name:report\",\"limit\":1000,\"offset\":1000}"#,
+            &engine,
+        );
+        assert_eq!(second_batch["ok"], true);
+        assert_eq!(second_batch["data"]["total"], 1005);
+        assert_eq!(second_batch["data"]["results"].as_array().unwrap().len(), 5);
+        assert_eq!(second_batch["data"]["has_more"], false);
+
+        drop(engine);
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
     fn reports_service_status() {
         let db_path = std::env::temp_dir().join(format!(
             "deep-search-service-status-{}.sqlite", std::process::id()
