@@ -136,7 +136,6 @@ fn logout_state_transition(
 /// Returns Some(true/false) when the current account's interactive sessions can
 /// be queried. None means the platform session query is unavailable; in that
 /// case the service stays running rather than stopping unexpectedly.
-#[cfg(target_os = "windows")]
 fn windows_output_has_session(output: &str, username: &str) -> bool {
     output.lines().skip(1).any(|line| {
         let session_user = line.split_whitespace().next().unwrap_or("").trim_start_matches('>');
