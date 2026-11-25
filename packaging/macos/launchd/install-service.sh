@@ -57,7 +57,10 @@ cat > "$plist" <<EOF
   <key>UserName</key><string>$(xml_escape "$username")</string>
   <key>WorkingDirectory</key><string>$home_xml</string>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key><false/>
+  </dict>
   <key>Umask</key><integer>63</integer>
   <key>ProcessType</key><string>Background</string>
   <key>StandardOutPath</key><string>$(xml_escape "$log_dir/service.log")</string>
