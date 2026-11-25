@@ -281,17 +281,17 @@ fn handle_request_with_context(
                 if paths.is_empty() {
                     return Err("At least one path is required".into());
                 }
+                if let Some(sender) = watch_roots {
+                    for path in &paths {
+                        let _ = sender.send(PathBuf::from(path));
+                    }
+                }
                 let report = if let Some(lock) = index_lock {
                     let _guard = lock.lock().map_err(|_| "Indexing lock is unavailable")?;
                     engine.index_paths(&paths)
                 } else {
                     engine.index_paths(&paths)
                 };
-                if let Some(sender) = watch_roots {
-                    for path in &paths {
-                        let _ = sender.send(PathBuf::from(path));
-                    }
-                }
                 Ok(json!({
                     "files_discovered": report.files_discovered,
                     "directories_scanned": report.directories_scanned,
