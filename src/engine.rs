@@ -37,8 +37,16 @@ impl SearchEngine {
         &self,
         paths: &[P],
     ) -> IndexingReport {
+        self.index_paths_internal(paths, true)
+    }
+
+    fn index_paths_internal<P: AsRef<Path>>(
+        &self,
+        paths: &[P],
+        persist_roots: bool,
+    ) -> IndexingReport {
         const INDEX_BATCH_SIZE: usize = 128;
-        if self.database.add_index_roots(paths).is_err() {
+        if persist_roots && self.database.add_index_roots(paths).is_err() {
             return IndexingReport { errors: 1, ..IndexingReport::default() };
         }
         let scan_id = match self.database.begin_scan() {
@@ -119,6 +127,29 @@ impl SearchEngine {
         }
 
         report
+    }
+
+    /// Refresh only paths reported by the filesystem watcher. Removed paths are
+    /// deleted directly; existing files or directories are scanned incrementally.
+    pub fn refresh_changed_paths(&self, paths: &[PathBuf]) -> IndexingReport {
+        let mut total = IndexingReport::default();
+        for path in paths {
+            let report = if path.exists() {
+                self.index_paths_internal(std::slice::from_ref(path), false)
+            } else {
+                match self.database.remove_path_tree(path) {
+                    Ok(removed) => IndexingReport { files_removed: removed, ..IndexingReport::default() },
+                    Err(_) => IndexingReport { errors: 1, ..IndexingReport::default() },
+                }
+            };
+            total.files_discovered += report.files_discovered;
+            total.directories_scanned += report.directories_scanned;
+            total.errors += report.errors;
+            total.files_saved += report.files_saved;
+            total.files_unchanged += report.files_unchanged;
+            total.files_removed += report.files_removed;
+        }
+        total
     }
 
     pub fn indexed_file_count(&self) -> Result<u64> {
