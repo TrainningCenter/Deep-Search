@@ -1300,6 +1300,14 @@ fn native_folder_picker() -> Vec<String> {
 }
 
 
+fn windows_network_drive_matches(path: &str, network_drives: &[String]) -> bool {
+    let normalized_path = path.trim().replace('/', "\\").to_ascii_lowercase();
+    network_drives.iter().any(|drive| {
+        let root = drive.trim().replace('/', "\\").trim_end_matches('\\').to_ascii_lowercase();
+        normalized_path == root || normalized_path.starts_with(&format!("{root}\\"))
+    })
+}
+
 fn nas_path_available(path: &str) -> bool {
     let target = PathBuf::from(path);
     if !target.is_absolute() {
@@ -1351,7 +1359,26 @@ fn nas_path_available(path: &str) -> bool {
     #[cfg(target_os = "windows")]
     {
         let value = path.trim_start();
-        return value.starts_with("\\\\") && target.is_dir();
+        if value.starts_with("\\\\") {
+            return target.is_dir();
+        }
+        let output = match std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "[System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq [System.IO.DriveType]::Network } | ForEach-Object { $_.Name }",
+            ])
+            .output()
+        {
+            Ok(output) if output.status.success() => output,
+            _ => return false,
+        };
+        let drives = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        return windows_network_drive_matches(value, &drives) && target.is_dir();
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -1677,6 +1704,15 @@ mod rtl_text_tests {
         assert!(!settings.notify_on_completion);
         assert!(!settings.notify_on_service_state);
         assert!(!settings.notify_on_nas_state);
+    }
+
+    #[test]
+    fn windows_nas_detection_recognizes_mapped_drives_case_insensitively() {
+        let drives = vec!["Z:\\".to_owned(), "Y:\\".to_owned()];
+        assert!(super::windows_network_drive_matches("z:\\media\\movie.mkv", &drives));
+        assert!(super::windows_network_drive_matches("Y:/backup", &drives));
+        assert!(!super::windows_network_drive_matches("C:\\media\\movie.mkv", &drives));
+        assert!(!super::windows_network_drive_matches("Z:\\other", &["Z:\\media".to_owned()]));
     }
 
     #[test]
