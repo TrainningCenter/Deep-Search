@@ -99,6 +99,37 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        "query-page" => {
+            if args.len() < 6 {
+                print_usage();
+                return Ok(());
+            }
+
+            let limit: u32 = args[3].parse()
+                .map_err(|_| "Page limit must be a positive integer")?;
+            let offset: u64 = args[4].parse()
+                .map_err(|_| "Page offset must be a non-negative integer")?;
+            let query_text = args[5..].join(" ");
+            let expression = parse_query(&query_text)?;
+            let total = engine.count_search_results(&expression)?;
+            let results = engine.search_page(&expression, limit, offset)?;
+
+            println!(
+                "Showing {} result(s) from offset {} ({} total match(es)).",
+                results.len(),
+                offset,
+                total
+            );
+            for file in results {
+                println!(
+                    "{} | {} bytes | {}",
+                    file.name,
+                    file.size_bytes,
+                    file.path.display()
+                );
+            }
+        }
+
         "content" => {
             if args.len() < 4 {
                 print_usage();
@@ -159,6 +190,7 @@ fn print_usage() {
     println!("  deep-search search <database> <name>");
     println!("  deep-search content <database> <text>");
     println!(r#"  deep-search query <database> 'name:video' AND (ext:mkv OR ext:mp4) AND size>=1GB"#);
+    println!(r#"  deep-search query-page <database> <limit> <offset> 'type:video' AND path:"Media Archive""#);
     println!("  deep-search extension <database> <extension>");
     println!("  deep-search count <database>");
 }
