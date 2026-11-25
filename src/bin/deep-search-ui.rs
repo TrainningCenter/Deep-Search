@@ -1031,12 +1031,7 @@ impl DeepSearchApp {
         }
         if ui.button(display_text(if self.arabic { "ملاءمة تلقائية للأعمدة" } else { "Auto-fit columns" })).clicked() {
             let widths = self.active_profile().columns.iter().map(|column| {
-                let header_width = column_label(&column.key, arabic).chars().count();
-                let content_width = self.results.iter().take(500)
-                    .map(|result| result_column_text(result, &column.key).chars().count())
-                    .max().unwrap_or(0);
-                let width = (header_width.max(content_width) as f32 * 8.0 + 28.0).clamp(60.0, 1000.0);
-                (column.key.clone(), width)
+                (column.key.clone(), auto_fit_column_width(&column.key, arabic, &self.results))
             }).collect::<BTreeMap<_, _>>();
             for column in &mut self.active_profile_mut().columns {
                 if let Some(width) = widths.get(&column.key) { column.width = *width; }
@@ -1513,6 +1508,16 @@ fn search_profile_query(profile: &SearchProfile) -> Option<String> {
     if conditions.is_empty() { return None; }
     let join = if profile.join_with_or { " OR " } else { " AND " };
     Some(conditions.join(join))
+}
+
+fn auto_fit_column_width(key: &str, arabic: bool, results: &[Value]) -> f32 {
+    let header_width = column_label(key, arabic).chars().count();
+    // Inspect every loaded result: sampling only the first 500 can clip a later
+    // long filename, path, source, or metadata value.
+    let content_width = results.iter()
+        .map(|result| result_column_text(result, key).chars().count())
+        .max().unwrap_or(0);
+    (header_width.max(content_width) as f32 * 8.0 + 28.0).clamp(60.0, 1000.0)
 }
 
 fn result_column_text(result: &Value, key: &str) -> String {
@@ -2104,6 +2109,18 @@ mod rtl_text_tests {
     fn left_to_right_text_is_unchanged() {
         let text = "Deep-Search report 2026";
         assert_eq!(display_text(text), text);
+    }
+
+    #[test]
+    fn auto_fit_checks_results_beyond_the_first_500_rows() {
+        let mut results = (0..501).map(|index| serde_json::json!({
+            "name": format!("file-{index}.txt")
+        })).collect::<Vec<_>>();
+        results.push(serde_json::json!({
+            "name": format!("{}.txt", "x".repeat(300))
+        }));
+        let width = super::auto_fit_column_width("name", false, &results);
+        assert!(width >= 1000.0);
     }
 
     #[test]
