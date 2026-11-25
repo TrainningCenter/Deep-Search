@@ -58,6 +58,10 @@ jobs:
           mkdir -p dist
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
           cp README.md dist/
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            mkdir -p dist/packaging/linux
+            cp -R packaging/linux/systemd dist/packaging/linux/
+          fi
           tar -czf deep-search-${{ matrix.platform }}.tar.gz -C dist .
 
       - name: Package Windows binary
