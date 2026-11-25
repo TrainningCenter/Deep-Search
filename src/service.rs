@@ -2,9 +2,13 @@ use crate::engine::SearchEngine;
 use crate::query::parse_query;
 use serde_json::{json, Value};
 use std::error::Error;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
+use std::time::Duration;
+
+const MAX_REQUEST_BYTES: usize = 1_048_576;
+const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Run the local JSON-line service. It intentionally binds to loopback by default;
 /// remote/NAS access requires a separately secured transport layer.
@@ -27,10 +31,13 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
 }
 
 fn handle_connection(mut stream: TcpStream, engine: &SearchEngine) -> Result<(), Box<dyn Error>> {
+    stream.set_read_timeout(Some(CONNECTION_TIMEOUT))?;
+    stream.set_write_timeout(Some(CONNECTION_TIMEOUT))?;
     let mut request = String::new();
-    BufReader::new(stream.try_clone()?).read_line(&mut request)?;
-    let response = if request.len() > 1_048_576 {
-        json!({"ok": false, "error": "Request exceeds the 1 MiB limit"})
+    let limited_stream = stream.try_clone()?.take((MAX_REQUEST_BYTES + 1) as u64);
+    BufReader::new(limited_stream).read_line(&mut request)?;
+    let response = if !is_valid_request_line(&request) {
+        json!({"ok": false, "error": "Request must be newline-terminated and no larger than 1 MiB"})
     } else {
         handle_request(&request, engine)
     };
@@ -38,6 +45,10 @@ fn handle_connection(mut stream: TcpStream, engine: &SearchEngine) -> Result<(),
     stream.write_all(b"\n")?;
     stream.flush()?;
     Ok(())
+}
+
+fn is_valid_request_line(request: &str) -> bool {
+    request.len() <= MAX_REQUEST_BYTES && request.ends_with('\n')
 }
 
 fn handle_request(input: &str, engine: &SearchEngine) -> Value {
@@ -97,6 +108,13 @@ fn handle_request(input: &str, engine: &SearchEngine) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_lines_are_bounded_and_terminated() {
+        assert!(is_valid_request_line("{\"command\":\"status\"}\n"));
+        assert!(!is_valid_request_line("{\"command\":\"status\"}"));
+        assert!(!is_valid_request_line(&format!("{}\n", "x".repeat(MAX_REQUEST_BYTES))));
+    }
 
     #[test]
     fn rejects_invalid_json_and_unknown_commands() {
