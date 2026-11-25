@@ -538,15 +538,12 @@ impl TableDelegate for ResultsTableDelegate<'_> {
         }
     }
 
-    fn row_ui(&mut self, ui: &mut egui::Ui, row_nr: u64) {
-        if row_nr % 2 == 1 {
-            ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
-        }
-    }
-
     fn cell_ui(&mut self, ui: &mut egui::Ui, cell: &CellInfo) {
         let Some(column) = self.columns.get(cell.col_nr) else { return; };
         let Some(result) = self.results.get(cell.row_nr as usize) else { return; };
+        if cell.row_nr % 2 == 1 {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
+        }
         let value = result_column_text(result, &column.key);
         if column.key == "name" {
             let path = result.get("path").and_then(Value::as_str).unwrap_or("").to_owned();
