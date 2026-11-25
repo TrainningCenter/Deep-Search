@@ -117,8 +117,9 @@ The desktop alpha currently provides automatic connection to the local service o
 
 - Per-source search inclusion controls: disable a source from the result set without deleting its index or stopping its background indexing; the source can be re-enabled immediately.
 - Every result carries its originating source path in a dedicated, sortable **Source** column; use `source:"/mnt/nas"` to filter by source.
+- Unquoted search terms expand common English inflections (for example, `invoice`, `invoices`, and `invoicing`); quoted terms use case-insensitive exact word/phrase boundaries without inflection expansion.
 - Advanced Search Builder supports multiple AND/OR conditions, enabling/disabling and reordering individual conditions, and saving named search layouts.
-- Media duration filters support seconds, minutes, hours, and clock notation, for example `duration>=90s`, `duration<=2h`, and `duration>=1:30`.
+- Media filters support duration (seconds, minutes, hours, clock notation), resolution presets and exact dimensions, and frame rate (including fractional rates such as 29.97), for example `duration>=90s`, `resolution:4K`, `resolution:1920x1080`, and `fps:>=59.94`.
 - Image metadata includes dimensions, detected format, and available EXIF camera make/model, capture time, and orientation; the Images view profile exposes these fields.
 - Incremental file indexing with batched SQLite writes and parallel CPU-based document extraction.
 - Persistent indexing roots and automatic filesystem change monitoring (create, modify, rename, delete) with debounced targeted refreshes; a 10-minute reconciliation pass catches missed events and changes on filesystems with limited notification support.
@@ -162,14 +163,16 @@ deep-search content index.sqlite "quarterly revenue"
 Use the query language. Bare terms search file names, paths, and indexed contents; quote multi-word phrases. Field qualifiers remain available for precise searches:
 
 ```bash
-deep-search query index.sqlite 'report'
-deep-search query index.sqlite '"holiday video" AND type:video'
+deep-search query index.sqlite 'invoice'                 # expands invoice / invoices / invoicing
+deep-search query index.sqlite '"invoice"'               # exact word/phrase; no inflection expansion
+deep-search query index.sqlite 'name:"holiday video" AND type:video'
 deep-search query index.sqlite 'name:"holiday video" AND (ext:mkv OR ext:mp4) AND size>=1GB'
 deep-search query index.sqlite 'type:document AND path:"project archive"'
 deep-search query index.sqlite 'content:"project roadmap" AND ext:pdf'
 deep-search query index.sqlite 'NOT ext:tmp AND size<=500MB'
 deep-search query index.sqlite 'type:video AND duration>=90s AND fps:>=60'
 deep-search query index.sqlite 'source:"/mnt/nas" AND ext:mp4'
+deep-search query index.sqlite 'resolution:4K AND fps:>=60'
 ```
 
 Get a bounded page of results:

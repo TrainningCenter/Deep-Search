@@ -17,7 +17,10 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
     let mut quoted = false;
     for ch in input.chars() {
         match ch {
-            '"' => quoted = !quoted,
+            '"' => {
+                if !quoted { current.push('\0'); }
+                quoted = !quoted;
+            },
             '(' | ')' if !quoted => {
                 if !current.is_empty() { tokens.push(std::mem::take(&mut current)); }
                 tokens.push(ch.to_string());
@@ -84,16 +87,19 @@ impl Parser {
 }
 
 fn parse_condition(token: &str) -> Result<SearchExpression, String> {
+    let exact = token.contains('\0');
+    let cleaned = token.replace('\0', "");
+    let token = cleaned.as_str();
     let lower = token.to_ascii_lowercase();
     if lower.starts_with("name:") {
         let value = &token[5..];
         if value.is_empty() { return Err("name: requires a value".into()); }
-        return Ok(SearchExpression::NameContains(value.into()));
+        return Ok(if exact { SearchExpression::NameExact(value.into()) } else { SearchExpression::NameContains(value.into()) });
     }
     if lower.starts_with("path:") {
         let value = &token[5..];
         if value.is_empty() { return Err("path: requires a value".into()); }
-        return Ok(SearchExpression::PathContains(value.into()));
+        return Ok(if exact { SearchExpression::PathExact(value.into()) } else { SearchExpression::PathContains(value.into()) });
     }
     if lower.starts_with("source:") {
         let value = &token[7..];
@@ -103,7 +109,7 @@ fn parse_condition(token: &str) -> Result<SearchExpression, String> {
     if lower.starts_with("content:") {
         let value = &token[8..];
         if value.is_empty() { return Err("content: requires a value".into()); }
-        return Ok(SearchExpression::ContentContains(value.into()));
+        return Ok(if exact { SearchExpression::ContentExact(value.into()) } else { SearchExpression::ContentContains(value.into()) });
     }
     if lower.starts_with("ext:") {
         let value = &token[4..];
@@ -163,11 +169,12 @@ fn parse_condition(token: &str) -> Result<SearchExpression, String> {
     if token.contains(':') || lower.starts_with("size>") || lower.starts_with("size<") || lower.starts_with("duration>") || lower.starts_with("duration<") || lower.starts_with("resolution>") || lower.starts_with("resolution<") || lower.starts_with("fps>") || lower.starts_with("fps<") {
         return Err(format!("Unknown condition '{token}'. Use name:, path:, content:, ext:, type:, size>=, size<=, duration>= or duration<="));
     }
-    Ok(SearchExpression::Or(vec![
-        SearchExpression::NameContains(token.to_string()),
-        SearchExpression::PathContains(token.to_string()),
-        SearchExpression::ContentContains(token.to_string()),
-    ]))
+    if exact {
+        if token.trim().is_empty() { return Err("Quoted search terms cannot be empty".into()); }
+        Ok(SearchExpression::ExactTerm(token.to_string()))
+    } else {
+        Ok(SearchExpression::ExpandedTerm(token.to_string()))
+    }
 }
 
 fn parse_resolution_dimension(value: &str) -> Result<u32, String> {
@@ -274,6 +281,14 @@ fn parse_size(value: &str) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn distinguishes_expanded_unquoted_terms_from_exact_quoted_terms() {
+        assert_eq!(parse_query("invoice").unwrap(), SearchExpression::ExpandedTerm("invoice".into()));
+        assert_eq!(parse_query("\"invoice\"").unwrap(), SearchExpression::ExactTerm("invoice".into()));
+        assert_eq!(parse_query("name:\"invoice\"").unwrap(), SearchExpression::NameExact("invoice".into()));
+        assert_eq!(parse_query("content:\"holiday video\"").unwrap(), SearchExpression::ContentExact("holiday video".into()));
+    }
 
     #[test]
     fn parses_resolution_and_frame_rate_filters() {

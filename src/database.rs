@@ -1,6 +1,6 @@
 
 use crate::{media::MediaMetadata, FileRecord, IndexingStatus};
-use rusqlite::{params, params_from_iter, types::Value, Connection, OpenFlags, OptionalExtension, Result};
+use rusqlite::{functions::FunctionFlags, params, params_from_iter, types::Value, Connection, OpenFlags, OptionalExtension, Result};
 use std::time::Duration;
 use serde::Serialize;
 use std::path::Path;
@@ -53,8 +53,13 @@ pub enum SearchSortDirection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchExpression {
     NameContains(String),
+    NameExact(String),
     PathContains(String),
+    PathExact(String),
     ContentContains(String),
+    ContentExact(String),
+    ExactTerm(String),
+    ExpandedTerm(String),
     ExtensionEquals(String),
     FileType(String),
     SizeAtLeast(u64),
@@ -74,7 +79,10 @@ pub enum SearchExpression {
 
 fn collect_name_terms<'a>(expression: &'a SearchExpression, terms: &mut Vec<&'a str>) {
     match expression {
-        SearchExpression::NameContains(term) => terms.push(term.trim()),
+        SearchExpression::NameContains(term)
+        | SearchExpression::NameExact(term)
+        | SearchExpression::ExactTerm(term)
+        | SearchExpression::ExpandedTerm(term) => terms.push(term.trim()),
         SearchExpression::And(items) | SearchExpression::Or(items) => {
             for item in items {
                 collect_name_terms(item, terms);
@@ -125,6 +133,25 @@ fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) ->
                 .replace('_', "\\_");
             values.push(Value::Text(format!("%{escaped}%")));
             format!("name LIKE ?{} ESCAPE '\\' COLLATE NOCASE", values.len())
+        }
+        SearchExpression::NameExact(term) => exact_field_sql("name", term, values),
+        SearchExpression::PathExact(term) => exact_field_sql("path", term, values),
+        SearchExpression::ContentExact(term) => exact_content_sql(term, values),
+        SearchExpression::ExactTerm(term) => {
+            let name = exact_field_sql("name", term, values);
+            let path = exact_field_sql("path", term, values);
+            let content = exact_content_sql(term, values);
+            format!("({name} OR {path} OR {content})")
+        }
+        SearchExpression::ExpandedTerm(term) => {
+            let mut variants = Vec::new();
+            for variant in expand_search_term(term) {
+                let name = exact_field_sql("name", &variant, values);
+                let path = exact_field_sql("path", &variant, values);
+                let content = exact_content_sql(&variant, values);
+                variants.push(format!("({name} OR {path} OR {content})"));
+            }
+            if variants.is_empty() { "0 = 1".to_string() } else { format!("({})", variants.join(" OR ")) }
         }
         SearchExpression::PathContains(term) => {
             let escaped = term.trim()
@@ -248,6 +275,95 @@ fn compile_expression(expression: &SearchExpression, values: &mut Vec<Value>) ->
     }
 }
 
+fn exact_field_sql(field: &str, term: &str, values: &mut Vec<Value>) -> String {
+    values.push(Value::Text(term.trim().to_owned()));
+    format!("deep_search_exact({field}, ?{})", values.len())
+}
+
+fn exact_content_sql(term: &str, values: &mut Vec<Value>) -> String {
+    let term = term.trim();
+    let exact = exact_field_sql("content", term, values);
+    if term.chars().count() >= 3 {
+        let phrase = format!("\"{}\"", term.replace('"', "\"\""));
+        values.push(Value::Text(phrase));
+        format!("(id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?{}) AND {exact})", values.len())
+    } else {
+        exact
+    }
+}
+
+fn expand_search_term(term: &str) -> Vec<String> {
+    let base = term.trim();
+    if base.is_empty() { return Vec::new(); }
+    let lower = base.to_lowercase();
+    let mut variants = vec![base.to_owned()];
+    if lower.chars().count() >= 3 {
+        if lower.ends_with('e') {
+            if let Some(stem) = base.strip_suffix('e').or_else(|| base.strip_suffix('E')) {
+                variants.push(format!("{base}s"));
+                variants.push(format!("{stem}ing"));
+            }
+        } else if lower.ends_with('y') {
+            let previous = lower.chars().rev().nth(1).unwrap_or('a');
+            if !"aeiou".contains(previous) {
+                if let Some(stem) = base.strip_suffix('y').or_else(|| base.strip_suffix('Y')) {
+                    variants.push(format!("{stem}ies"));
+                }
+            } else {
+                variants.push(format!("{base}s"));
+            }
+            variants.push(format!("{base}ing"));
+        } else if ["s", "x", "z", "ch", "sh", "o"].iter().any(|suffix| lower.ends_with(suffix)) {
+            variants.push(format!("{base}es"));
+            variants.push(format!("{base}ing"));
+        } else {
+            variants.push(format!("{base}s"));
+            variants.push(format!("{base}ing"));
+        }
+    }
+    let mut unique = Vec::new();
+    for variant in variants {
+        if !unique.iter().any(|existing: &String| existing.eq_ignore_ascii_case(&variant)) {
+            unique.push(variant);
+        }
+    }
+    unique
+}
+
+fn exact_phrase_contains(haystack: &str, needle: &str) -> bool {
+    let needle = needle.trim().to_lowercase();
+    if needle.is_empty() { return false; }
+    let haystack = haystack.to_lowercase();
+    let is_word = |ch: char| ch.is_alphanumeric() || ch == '_';
+    let mut offset = 0;
+    while offset <= haystack.len() {
+        let Some(relative) = haystack[offset..].find(&needle) else { break; };
+        let start = offset + relative;
+        let end = start + needle.len();
+        let before = haystack[..start].chars().next_back();
+        let after = haystack[end..].chars().next();
+        if !before.is_some_and(is_word) && !after.is_some_and(is_word) {
+            return true;
+        }
+        offset = end;
+    }
+    false
+}
+
+fn register_search_functions(connection: &Connection) -> Result<()> {
+    connection.create_scalar_function(
+        "deep_search_exact",
+        2,
+        FunctionFlags::SQLITE_DETERMINISTIC,
+        |context| {
+            let haystack: Option<String> = context.get(0)?;
+            let needle: String = context.get(1)?;
+            Ok(haystack.as_deref().is_some_and(|value| exact_phrase_contains(value, &needle)))
+        },
+    )?;
+    Ok(())
+}
+
 const ROOT_MATCH_SQL: &str = "(files.path = r.path OR (substr(files.path, 1, length(r.path)) = r.path AND (substr(r.path, -1, 1) IN ('/', char(92)) OR substr(files.path, length(r.path) + 1, 1) IN ('/', char(92)))))";
 
 fn source_path_sql() -> String {
@@ -265,6 +381,7 @@ pub struct Database {
 impl Database {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let connection = Connection::open(path)?;
+        register_search_functions(&connection)?;
         connection.busy_timeout(Duration::from_secs(30))?;
         let database = Self { connection };
         database.initialize()?;
@@ -278,6 +395,7 @@ impl Database {
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_FULL_MUTEX,
         )?;
+        register_search_functions(&connection)?;
         connection.busy_timeout(Duration::from_secs(30))?;
         connection.execute_batch("PRAGMA foreign_keys = ON;")?;
         Ok(Self { connection })
@@ -959,6 +1077,29 @@ mod database_tests {
             modified_timestamp_ns: Some(1_700_000_000),
             status: IndexingStatus::Pending,
         }
+    }
+
+    #[test]
+    fn expands_unquoted_terms_and_keeps_quoted_terms_exact() {
+        let db = Database::open(":memory:").unwrap();
+        for name in ["invoice.txt", "invoices.txt", "invoicing.txt", "invoicee.txt"] {
+            db.upsert_file(&sample_file(name, 1)).unwrap();
+        }
+        let expanded = db.search(&SearchExpression::ExpandedTerm("invoice".into())).unwrap();
+        let mut expanded_names = expanded.iter().map(|item| item.name.as_str()).collect::<Vec<_>>();
+        expanded_names.sort_unstable();
+        assert_eq!(expanded_names, vec!["invoice.txt", "invoicing.txt", "invoices.txt"]);
+
+        let exact = db.search(&SearchExpression::ExactTerm("invoice".into())).unwrap();
+        assert_eq!(exact.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(), vec!["invoice.txt"]);
+    }
+
+    #[test]
+    fn exact_phrase_matcher_respects_word_boundaries_and_case() {
+        assert!(exact_phrase_contains("Invoice, invoices, and invoicing", "invoice"));
+        assert!(!exact_phrase_contains("invoices", "invoice"));
+        assert!(exact_phrase_contains("holiday video.MKV", "holiday video"));
+        assert!(!exact_phrase_contains("holiday videos", "holiday video"));
     }
 
     #[test]

@@ -23,7 +23,7 @@ default = []
 desktop = ["dep:eframe", "dep:egui_table", "dep:tray-icon", "dep:notify-rust", "dep:arabic", "dep:unicode-bidi"]
 
 [dependencies]
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled", "functions"] }
 pdf-extract = "0.10"
 roxmltree = "0.20"
 zip = { version = "4", default-features = false, features = ["deflate"] }
