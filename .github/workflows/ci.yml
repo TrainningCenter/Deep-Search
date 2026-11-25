@@ -25,7 +25,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Validate Linux service scripts
-        run: bash -n packaging/linux/systemd/install-service.sh packaging/linux/systemd/uninstall-service.sh
+        run: bash -n packaging/linux/systemd/install-service.sh packaging/linux/systemd/uninstall-service.sh packaging/linux/systemd/deep-search-service.sh packaging/linux/systemd/test-service-control.sh
+
+      - name: Test Linux service control helper
+        run: bash packaging/linux/systemd/test-service-control.sh
 
       - name: Build project
         run: cargo build --all-targets
