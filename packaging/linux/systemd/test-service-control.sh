@@ -22,9 +22,14 @@ cat > "$tmp/systemctl" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "$DEEP_SEARCH_SYSTEMCTL_ARGS"
 MOCK
-chmod +x "$tmp/getent" "$tmp/id" "$tmp/systemctl"
+cat > "$tmp/journalctl" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$DEEP_SEARCH_JOURNAL_ARGS"
+MOCK
+chmod +x "$tmp/getent" "$tmp/id" "$tmp/systemctl" "$tmp/journalctl"
 export PATH="$tmp:$PATH"
 export DEEP_SEARCH_SYSTEMCTL_ARGS="$tmp/systemctl-args"
+export DEEP_SEARCH_JOURNAL_ARGS="$tmp/journal-args"
 
 output="$(bash "$script" 2>&1)" && {
   echo "Expected missing-argument invocation to fail." >&2
@@ -46,6 +51,12 @@ output="$(bash "$script" status 'bad;user' 2>&1)" && {
 
 bash "$script" is-active testuser
 [[ "$(cat "$DEEP_SEARCH_SYSTEMCTL_ARGS")" == "is-active deep-search@testuser.service" ]]
+
+bash "$script" logs testuser
+[[ "$(cat "$DEEP_SEARCH_JOURNAL_ARGS")" == "--unit deep-search@testuser.service --no-pager --lines=100" ]]
+
+bash "$script" logs-follow testuser
+[[ "$(cat "$DEEP_SEARCH_JOURNAL_ARGS")" == "--unit deep-search@testuser.service --follow" ]]
 
 if bash "$script" start testuser >"$tmp/start.out" 2>&1; then
   echo "Expected non-root start request to be rejected." >&2
