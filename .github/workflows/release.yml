@@ -71,6 +71,9 @@ jobs:
           if [ "${{ runner.os }}" = "Linux" ]; then
             mkdir -p dist/packaging/linux
             cp -R packaging/linux/systemd dist/packaging/linux/
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            mkdir -p dist/packaging/macos
+            cp -R packaging/macos/launchd dist/packaging/macos/
           fi
           tar -czf deep-search-${{ matrix.platform }}.tar.gz -C dist .
 
@@ -82,6 +85,8 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" dist/
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.ui_binary }}" dist/
           Copy-Item README.md dist/
+          New-Item -ItemType Directory -Force -Path dist/packaging/windows | Out-Null
+          Copy-Item -Recurse packaging/windows/task-scheduler dist/packaging/windows/
           Compress-Archive -Path dist/* -DestinationPath "deep-search-${{ matrix.platform }}.zip"
 
       - name: Generate checksum
