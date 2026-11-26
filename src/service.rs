@@ -34,7 +34,8 @@ pub fn run(database_path: &Path, address: &str) -> Result<(), Box<dyn Error>> {
         Arc::clone(&index_lock),
         Arc::clone(&indexing_paused),
     );
-    let container_mode = std::env::var("DEEP_SEARCH_CONTAINER_MODE").as_deref() == Ok("1");
+    // Only the dedicated Docker build enables bridge binding; runtime environment variables cannot bypass this guard.
+    let container_mode = cfg!(feature = "container-bridge");
     let listener = bind_service_listener(address, container_mode)?;
     listener.set_nonblocking(true)?;
     eprintln!("Deep-Search service listening on {address}");
@@ -108,7 +109,7 @@ fn bind_service_listener(address: &str, allow_container_bridge: bool) -> Result<
             && !(allow_container_bridge && socket.ip().is_unspecified())
     }) {
         return Err(
-            "Refusing to expose the unauthenticated service outside loopback; container bridge binding requires DEEP_SEARCH_CONTAINER_MODE=1 and a loopback-only host port".into(),
+            "Refusing to expose the unauthenticated service outside loopback; container bridge binding requires a build compiled with the container-bridge feature and a loopback-only host port".into(),
         );
     }
     Ok(TcpListener::bind(address)?)
