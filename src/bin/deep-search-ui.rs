@@ -75,6 +75,7 @@ fn default_frozen_columns() -> usize { 1 }
 
 fn default_enabled() -> bool { true }
 fn default_disabled() -> bool { false }
+fn default_service_address() -> String { "127.0.0.1:4765".to_owned() }
 
 #[derive(Serialize, Deserialize)]
 struct UiSettings {
@@ -98,6 +99,8 @@ struct UiSettings {
     search_profiles: BTreeMap<String, SearchProfile>,
     #[serde(default)]
     active_search_profile: String,
+    #[serde(default = "default_service_address")]
+    service_address: String,
 }
 
 impl Default for UiSettings {
@@ -114,6 +117,7 @@ impl Default for UiSettings {
             notify_on_nas_state: false,
             search_profiles: BTreeMap::new(),
             active_search_profile: String::new(),
+            service_address: default_service_address(),
         }
     }
 }
@@ -271,7 +275,7 @@ impl Default for DeepSearchApp {
         let (sender, receiver) = mpsc::channel();
         let settings = UiSettings::load();
         Self {
-            service_address: "127.0.0.1:4765".to_owned(),
+            service_address: settings.service_address.clone(),
             search_query: "type:video".to_owned(),
             roots: String::new(),
             sort_field: "name".to_owned(),
@@ -1271,7 +1275,13 @@ impl eframe::App for DeepSearchApp {
                 |ui| {
             ui.heading(display_text(if self.arabic { "الخدمة" } else { "Service" }));
             ui.label(display_text(if self.arabic { "عنوان الخدمة" } else { "Address" }));
-            ui.with_layout(horizontal_layout(self.arabic), |ui| { ui.text_edit_singleline(&mut self.service_address); });
+            let address_changed = ui.with_layout(horizontal_layout(self.arabic), |ui| {
+                ui.text_edit_singleline(&mut self.service_address).changed()
+            }).inner;
+            if address_changed {
+                self.settings.service_address = self.service_address.trim().to_owned();
+                self.persist_settings();
+            }
             if ui.button(display_text(if self.arabic { "اتصال / تحديث الحالة" } else { "Connect / Refresh status" })).clicked() {
                 self.check_status();
             }
