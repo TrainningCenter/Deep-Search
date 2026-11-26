@@ -51,6 +51,9 @@ jobs:
       - name: Run tests
         run: cargo test --all-targets
 
+      - name: Test container bridge compile-time policy
+        run: cargo test --features container-bridge --all-targets
+
       - name: Build Docker service image
         run: docker build --tag deep-search:ci .
 

@@ -216,7 +216,7 @@ You can override the loopback bind address explicitly:
 deep-search serve index.sqlite 127.0.0.1:4765
 ```
 
-The service rejects non-loopback bind addresses (including `0.0.0.0` and `[::]`) while its protocol has no authentication or encryption. This is enforced by the service itself, not only by the sample configuration. Remote access will be enabled only after an authenticated and encrypted transport is implemented.
+Native service builds reject non-loopback bind addresses (including `0.0.0.0` and `[::]`) while the protocol has no authentication or encryption. The Docker image is compiled with a dedicated container-bridge feature so the service can bind inside its isolated container; the supplied Compose configuration still publishes the host port on `127.0.0.1` only. Do not change that host binding or expose the service to an untrusted network. Remote access will be enabled only after an authenticated and encrypted transport is implemented.
 
 Available request examples (send each as a single line):
 

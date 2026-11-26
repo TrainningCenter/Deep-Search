@@ -675,6 +675,18 @@ mod tests {
     }
 
     #[test]
+    fn service_bind_policy_matches_compile_time_container_feature() {
+        let allow_container_bridge = cfg!(feature = "container-bridge");
+        let result = bind_service_listener("0.0.0.0:0", allow_container_bridge);
+        if allow_container_bridge {
+            assert!(result.is_ok());
+        } else {
+            let error = result.unwrap_err();
+            assert!(error.to_string().contains("outside loopback"));
+        }
+    }
+
+    #[test]
     fn service_bind_accepts_ipv4_loopback() {
         let listener = bind_service_listener("127.0.0.1:0", false).unwrap();
         assert!(listener.local_addr().unwrap().ip().is_loopback());
