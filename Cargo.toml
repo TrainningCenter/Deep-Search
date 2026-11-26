@@ -21,6 +21,7 @@ required-features = ["desktop"]
 [features]
 default = []
 desktop = ["dep:eframe", "dep:egui_table", "dep:tray-icon", "dep:notify-rust", "dep:arabic", "dep:unicode-bidi"]
+container-bridge = []
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled", "functions"] }
