@@ -88,6 +88,20 @@ docker compose down
 
 The service has no authentication/TLS layer yet. Do not change the host binding to `0.0.0.0` or expose the container port to an untrusted network. Remote service access must wait for the secured transport implementation.
 
+### Secure remote desktop access with an SSH tunnel (interim)
+
+The native service protocol is raw TCP, not HTTPS. Until native authenticated TLS transport is implemented, an SSH local-forwarding tunnel is the supported way to connect a desktop client on another computer without exposing the service port. Keep the service bound to loopback on the server (the Docker Compose default already does this), and make sure SSH access is restricted to trusted accounts and preferably SSH keys.
+
+On the **client computer**, first stop its own local Deep-Search service if it is already using port 4765. Then open a terminal and run:
+
+```sh
+ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:4765:127.0.0.1:4765 your-user@your-server
+```
+
+Replace `your-user@your-server` with the SSH account and hostname of the computer running Deep-Search. Keep this terminal open while using the desktop application; the application's normal `127.0.0.1:4765` connection is carried through the encrypted SSH tunnel to the server's loopback-only service. Verify the SSH host key on first connection. Do not open TCP port 4765 in the server firewall or change the service bind address to a public/LAN interface. Close the tunnel with Ctrl+C when finished.
+
+This is a secure transport workaround, not native multi-user authentication: SSH controls who can create the tunnel, while Deep-Search itself does not yet identify individual remote users or authorize per-user indexing actions. The client currently uses the fixed local port 4765, so stop a competing local service before opening the tunnel.
+
 # Desktop application (alpha)
 
 The first cross-platform desktop window is available behind the `desktop` feature. It connects to the background service at `127.0.0.1:4765`, lets you submit one or more indexing paths, and displays search matches in a resizable table. Search results stream into the table as transport batches arrive; the 1000-record service limit is not a cap on the total number of displayed matches.
