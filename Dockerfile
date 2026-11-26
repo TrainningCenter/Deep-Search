@@ -3,7 +3,7 @@ FROM rust:1.91-bookworm AS builder
 WORKDIR /build
 COPY Cargo.toml ./
 COPY src ./src
-RUN cargo build --release --bin deep-search
+RUN cargo build --release --features container-bridge --bin deep-search
 
 FROM debian:bookworm-slim
 
@@ -22,7 +22,6 @@ WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 4765
 
-# Container bridge binding is allowed only for the isolated Docker deployment.
+# This image alone is compiled with container bridge binding enabled.
 # compose.yaml publishes this port on host loopback only.
-ENV DEEP_SEARCH_CONTAINER_MODE=1
 ENTRYPOINT ["deep-search", "serve", "/data/index.sqlite", "0.0.0.0:4765"]
