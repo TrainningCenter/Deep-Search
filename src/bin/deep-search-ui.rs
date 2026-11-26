@@ -2134,6 +2134,23 @@ mod rtl_text_tests {
     }
 
     #[test]
+    fn legacy_ui_settings_default_service_address_to_loopback() {
+        let settings: UiSettings = serde_json::from_str(
+            r#"{"profiles":{},"active_profile":""}"#,
+        ).unwrap();
+        assert_eq!(settings.service_address, "127.0.0.1:4765");
+    }
+
+    #[test]
+    fn ui_settings_round_trip_custom_service_address() {
+        let mut settings = UiSettings::default();
+        settings.service_address = "127.0.0.1:4766".into();
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let decoded: UiSettings = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.service_address, "127.0.0.1:4766");
+    }
+
+    #[test]
     fn notification_defaults_follow_opt_in_policy() {
         let settings = UiSettings::default();
         assert!(settings.notify_on_errors);
